@@ -1,0 +1,9 @@
+mcp>=0.1.0
+fastapi
+uvicorn
+chromadb
+sentence-transformers
+langchain-text-splitters
+pydantic
+python-dotenv
+pydantic-settings

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "code-memory": {
+      "command": "/Users/juandisay/Organizer/mcp-code-search/venv/bin/python",
+      "args": ["/Users/juandisay/Organizer/mcp-code-search/main.py", "--mcp"],
+      "env": {
+        "CHROMA_DATA_PATH": "data",
+        "PROJECT_FOLDER_TO_INDEX": "/Users/juandisay/Organizer/mcp-code-search"
+      }
+    }
+  }
+}
