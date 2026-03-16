@@ -1,24 +1,34 @@
-# Dynamic Technology Stack Detection
+# Project Technology Stack (Python / FastAPI / ChromaDB)
 
-## Automatic Stack Discovery
-- At the start of the session, you MUST detect the project's technology stack by scanning the following (but not limited to) indicators:
-  - **Manifest Files**: `package.json`, `requirements.txt`, `go.mod`, `pom.xml`, `Cargo.toml`, `Gemfile`, `composer.json`, etc.
-  - **Configuration Files**: `tsconfig.json`, `pytest.ini`, `.eslintrc`, `next.config.js`, etc.
-  - **Environment**: `.env.example`, `docker-compose.yml`.
-- You MUST adapt your coding style, linting rules, and best practices based on the detected language and framework.
+## 🐍 Python Environment & Libraries
+- **Language**: Python 3.10+
+- **Project Root**: `/Users/juandisay/Organizer/mcp-code-search`
+- **Core Dependencies**:
+  - `fastapi` & `uvicorn`: Digunakan di `main.py` untuk management API.
+  - `mcp` (FastMCP): Digunakan untuk implementasi Model Context Protocol server.
+  - `chromadb`: Vector database untuk penyimpanan index kode (lokal di folder `data/`).
+  - `sentence-transformers`: Digunakan untuk menghasilkan embedding dari potongan kode.
+  - `pydantic` & `pydantic-settings`: Digunakan di `config.py` dan data model untuk validasi dan manajemen konfigurasi.
+  - `langchain-text-splitters`: Digunakan di `core/indexer.py` untuk memecah file kode menjadi bagian-bagian kecil (chunks).
 
-## Multi-Language Support
-- This project may contain multiple programming languages. You are required to:
-  - Identify the primary and secondary languages in the current workspace.
-  - Follow the official style guide for whichever language you are currently editing (e.g., PEP 8 for Python, Airbnb/Google for JS/TS, Effective Go for Go).
-  - Ensure compatibility between different components of the stack.
+## 📂 Critical Project Paths (Absolute)
+- **Entry Point**: `/Users/juandisay/Organizer/mcp-code-search/main.py`
+- **Core Logic**: `/Users/juandisay/Organizer/mcp-code-search/core/`
+  - Indexer: `core/indexer.py`
+  - Searcher: `core/searcher.py`
+- **Configuration**: `/Users/juandisay/Organizer/mcp-code-search/config.py`
+- **Database Storage**: `/Users/juandisay/Organizer/mcp-code-search/data/`
+- **Requirements**: `/Users/juandisay/Organizer/mcp-code-search/requirements.txt`
 
-## Language-Specific Context
-- Use `code-memory` search to identify existing patterns within specific file extensions:
-  - `code-memory:semantic_code_search(query="common patterns in *.ts files")`
-- Always look for a `.editorconfig` or existing linting configs in the root to understand the specific formatting requirements (indentation, line length, etc.).
+## 🛠️ Development Standards
+- **Linter**: Flake8 (linting rules ada di `.flake8`).
+- **Testing**: Pytest (semua test harus ada di folder `tests/`).
+- **Environment**: Menggunakan `venv` di root project.
 
-## Universal Standards
-- **Clarity**: Write self-documenting code regardless of the language.
-- **Documentation**: Provide docstrings/comments in the idiomatic style of the language.
-- **Testing**: Look for the existing test suite pattern and follow it.
+## 📜 Coding Guidelines
+- **PEP 8**: Wajib diikuti untuk kebersihan kode Python.
+- **Type Hinting**: Gunakan type hints pada setiap fungsi dan variabel (Pydantic models sangat disarankan).
+- **Docstrings**: Setiap class dan function baru wajib memiliki docstring deskriptif.
+- **RAG Validation**: Selalu lakukan `index_folder` setelah modifikasi file di `core/` atau `main.py`.
+
+

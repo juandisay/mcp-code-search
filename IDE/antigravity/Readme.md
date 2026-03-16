@@ -1,4 +1,4 @@
-# Customize Antigravity with Code-Memory
+# Customize Antigravity with Code-Memory oleh AI generate
 
 This project is configured to use **Antigravity** with enhanced RAG (Retrieval-Augmented Generation) capabilities via the `code-memory` MCP.
 
@@ -17,8 +17,8 @@ Or manually rename the following files:
 1. **Auto-Indexing**: Every time a new prompt session begins, the agent will call `code-memory:index_folder` to ensure the vector database knows your latest code.
 2. **Dynamic Stack Detection**: The agent will automatically scan your files (like `package.json`, `requirements.txt`) to identify the languages and frameworks used, then adapt its rules accordingly.
 3. **Context-First**: The agent is instructed to perform a `semantic_code_search` before making any suggestions.
-3. **Skill Capture**: Reusable logic is automatically saved to `.agents/skills/` when marked as "usable".
-4. **Planning & Docs**: Every change requires a formal plan and detailed documentation.
+4. **Skill Capture**: Reusable logic is automatically saved to `.agents/skills/` when marked as "usable".
+5. **Planning & Docs**: Every change requires a formal plan and detailed documentation.
 
 ## Running the Setup
 

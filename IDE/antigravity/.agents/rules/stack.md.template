@@ -1,24 +1,28 @@
-# Dynamic Technology Stack Detection
+# Technology Stack (TEMPLATE)
 
-## Automatic Stack Discovery
-- At the start of the session, you MUST detect the project's technology stack by scanning the following (but not limited to) indicators:
-  - **Manifest Files**: `package.json`, `requirements.txt`, `go.mod`, `pom.xml`, `Cargo.toml`, `Gemfile`, `composer.json`, etc.
-  - **Configuration Files**: `tsconfig.json`, `pytest.ini`, `.eslintrc`, `next.config.js`, etc.
-  - **Environment**: `.env.example`, `docker-compose.yml`.
-- You MUST adapt your coding style, linting rules, and best practices based on the detected language and framework.
+> [!IMPORTANT]
+> This is a template. In a real project, replace this content with the actual technology stack detected in the repository (e.g., Python/FastAPI, Node/Next.js, etc.).
 
-## Multi-Language Support
-- This project may contain multiple programming languages. You are required to:
-  - Identify the primary and secondary languages in the current workspace.
-  - Follow the official style guide for whichever language you are currently editing (e.g., PEP 8 for Python, Airbnb/Google for JS/TS, Effective Go for Go).
-  - Ensure compatibility between different components of the stack.
+## 🔍 Automatic Stack Discovery (for Agent)
+- At the start of the session, you MUST detect the project's technology stack by scanning indicators.
+- **Priority Files**: `package.json`, `requirements.txt`, `go.mod`, `pom.xml`, `Cargo.toml`, `Gemfile`, `composer.json`, etc.
+- **Ignore Noise**: DO NOT scan inside `node_modules`, `.git`, `dist`, or `build` for stack detection.
+- **Adaptation**: You MUST adapt your coding style, linting rules, and best practices based on the detected language and framework.
+- **Specific Discovery**:
+  - **Libraries**: Identifikasi library utama dan jelaskan kegunaannya (contoh: FastAPI untuk API, ChromaDB untuk DB).
+  - **Absolute Paths**: Identifikasi path absolut untuk file-file kritis (`main.py`, `config`, folder core, dll).
 
-## Language-Specific Context
-- Use `code-memory` search to identify existing patterns within specific file extensions:
-  - `code-memory:semantic_code_search(query="common patterns in *.ts files")`
-- Always look for a `.editorconfig` or existing linting configs in the root to understand the specific formatting requirements (indentation, line length, etc.).
+## 🛠️ Multi-Language Support
+- Identify the primary and secondary languages in the current workspace.
+- Follow the official style guide for whichever language you are currently editing.
+- Ensure compatibility between different components of the stack.
 
-## Universal Standards
+## 📚 Language-Specific Context
+- Use `code-memory` search to identify existing patterns within specific file extensions.
+- Look for configuration files like `.editorconfig`, `tsconfig.json`, or `.eslintrc` to understand formatting requirements.
+
+## ⚖️ Universal Standards
 - **Clarity**: Write self-documenting code regardless of the language.
 - **Documentation**: Provide docstrings/comments in the idiomatic style of the language.
-- **Testing**: Look for the existing test suite pattern and follow it.
+- **Testing**: Follow existing test suite patterns.
+
