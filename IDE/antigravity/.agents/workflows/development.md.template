@@ -20,3 +20,4 @@ description: Development & Indexing Workflow
 
 ## 4. Skills Capture
 - If a feature is identified as "usable", create a new skill in `.agents/skills/`.
+
