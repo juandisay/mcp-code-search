@@ -9,10 +9,7 @@ from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
 
 from config import config
-from core.searcher import CodeSearcher
-from core.indexer import CodeIndexer
 from core.token_manager import token_manager
-from core.watcher import ProjectWatcher
 from core.rule_manager import rule_manager
 
 logging.basicConfig(
@@ -25,11 +22,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------- #
-#  Core Services                                            #
+#  Core Services (Lazy-initialized)                         #
 # --------------------------------------------------------- #
-indexer = CodeIndexer()
-searcher = CodeSearcher()
-watcher = ProjectWatcher(indexer)
+_indexer = None
+_searcher = None
+_watcher = None
+
+def get_indexer():
+    global _indexer
+    if _indexer is None:
+        from core.indexer import CodeIndexer
+        _indexer = CodeIndexer()
+    return _indexer
+
+def get_searcher():
+    global _searcher
+    if _searcher is None:
+        from core.searcher import CodeSearcher
+        _searcher = CodeSearcher()
+    return _searcher
+
+def get_watcher():
+    global _watcher
+    if _watcher is None:
+        from core.watcher import ProjectWatcher
+        _watcher = ProjectWatcher(get_indexer())
+    return _watcher
 
 # --------------------------------------------------------- #
 #  MCP Server                                               #
@@ -58,7 +76,7 @@ def semantic_code_search(
         file_path_includes: Require a specific substring in file path.
         excluded_dirs: Exclude directories from search (e.g. ['node_modules', 'tests']).
     """
-    results = searcher.search(
+    results = get_searcher().search(
         query, n_results, project_name, max_distance,
         language=language, file_path_includes=file_path_includes, excluded_dirs=excluded_dirs
     )
@@ -101,11 +119,11 @@ def index_folder(folder_path: str) -> str:
         )
 
     try:
-        summary = indexer.index_project_folder(
+        summary = get_indexer().index_project_folder(
             folder_path
         )
         # Start watching after initial index
-        watcher.start(folder_path)
+        get_watcher().start(folder_path)
         # For indexing, we can't easily count tokens of everything 
         # without reading it all again, but CodeIndexer already 
         # has the content during processing.
@@ -125,7 +143,7 @@ def index_folder(folder_path: str) -> str:
 @mcp.tool()
 def list_indexed_projects() -> str:
     """List all indexed project names."""
-    projects = indexer.list_projects()
+    projects = get_indexer().list_projects()
     if not projects:
         return "No projects have been indexed yet."
     return "Indexed projects:\n" + "\n".join(
@@ -136,9 +154,9 @@ def list_indexed_projects() -> str:
 @mcp.tool()
 def get_index_stats() -> str:
     """Get code search index statistics."""
-    collection = indexer.collection
+    collection = get_indexer().collection
     count = collection.count()
-    projects = indexer.list_projects()
+    projects = get_indexer().list_projects()
     proj_str = (
         ", ".join(projects) if projects else "none"
     )
@@ -186,7 +204,7 @@ def _run_background_indexing(folder_path: str):
     """Run indexing in a background thread."""
     if os.path.isdir(folder_path):
         try:
-            summary = indexer.index_project_folder(
+            summary = get_indexer().index_project_folder(
                 folder_path
             )
             logger.info(
@@ -194,7 +212,7 @@ def _run_background_indexing(folder_path: str):
                 folder_path, summary['chunks_upserted'], summary['total_tokens']
             )
             # Start watching after initial index
-            watcher.start(folder_path)
+            get_watcher().start(folder_path)
         except Exception as e:
             logger.error(
                 "Error during auto-indexing: %s", e
@@ -217,8 +235,9 @@ async def lifespan(app: FastAPI):
             config.PROJECT_FOLDER_TO_INDEX,
         )
     yield
-    if 'watcher' in globals() and watcher:
-        watcher.stop()
+    global _watcher
+    if _watcher:
+        _watcher.stop()
 
 
 app = FastAPI(
@@ -266,9 +285,9 @@ async def api_index_folder(
 @app.get("/stats")
 async def api_stats():
     """Return ChromaDB stats (PRD §6.2)."""
-    collection = indexer.collection
+    collection = get_indexer().collection
     count = collection.count()
-    projects = indexer.list_projects()
+    projects = get_indexer().list_projects()
     return {
         "total_indexed_chunks": count,
         "collection_name": collection.name,
@@ -304,6 +323,22 @@ if __name__ == "__main__":
             "Starting MCP server (stdio)..."
         )
         mcp.run()
+    elif "--index" in sys.argv:
+        try:
+            idx = sys.argv.index("--index")
+            if idx + 1 < len(sys.argv):
+                folder = sys.argv[idx + 1]
+                logger.info("Manual index triggered for: %s", folder)
+                summary = get_indexer().index_project_folder(folder)
+                print(f"\nIndexing Complete for {folder}")
+                print(f"Files Processed: {summary['files_processed']}")
+                print(f"Files Skipped: {summary['files_skipped']}")
+                print(f"Total Chunks: {summary['chunks_upserted']}")
+                print(f"Total Tokens: {summary['total_tokens']}\n")
+            else:
+                print("Error: Missing folder path after --index")
+        except Exception as e:
+            print(f"Error during manual indexing: {e}")
     else:
         import uvicorn
 

@@ -1,4 +1,5 @@
 import os
+import json
 import hashlib
 import logging
 from pathlib import Path
@@ -84,8 +85,27 @@ class CodeIndexer:
             ".idea", ".vscode",
         }
 
-        # In-memory hash cache: file_path -> sha256
-        self._hash_cache: Dict[str, str] = {}
+        # Persistent hash cache: file_path -> sha256
+        self.hash_cache_path = Path(config.CHROMA_DATA_PATH) / "hash_cache.json"
+        self._hash_cache: Dict[str, str] = self._load_hash_cache()
+
+    def _load_hash_cache(self) -> Dict[str, str]:
+        """Load hash cache from disk."""
+        if self.hash_cache_path.exists():
+            try:
+                with open(self.hash_cache_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load hash cache: %s", e)
+        return {}
+
+    def _save_hash_cache(self):
+        """Save hash cache to disk."""
+        try:
+            with open(self.hash_cache_path, "w", encoding="utf-8") as f:
+                json.dump(self._hash_cache, f, indent=2)
+        except Exception as e:
+            logger.error("Failed to save hash cache: %s", e)
 
     def _get_splitter(self, ext: str):
         """Return an AST-aware chunker or a generic fallback splitter."""
@@ -152,6 +172,8 @@ class CodeIndexer:
 
             if current_hash:
                 self._hash_cache[file_path] = current_hash
+        
+        self._save_hash_cache()
 
         if skipped:
             logger.info(
@@ -199,6 +221,7 @@ class CodeIndexer:
                         
         # Remove from hash cache if present
         self._hash_cache.pop(file_path, None)
+        self._save_hash_cache()
 
     def update_file(self, file_path: str, project_name: str) -> dict:
         """Clean up old chunks and re-index a single file."""
@@ -216,23 +239,43 @@ class CodeIndexer:
         
         if current_hash:
             self._hash_cache[file_path] = current_hash
+            self._save_hash_cache()
             
         return {"chunks_upserted": chunks, "total_tokens": tokens}
 
     def list_projects(self) -> list[str]:
         """Return unique project names from metadata."""
+        projects = set()
         try:
-            all_meta = self.collection.get(
-                include=["metadatas"]
-            )
-            projects = set()
-            for m in (all_meta.get("metadatas") or []):
-                if m and m.get("project_name"):
-                    projects.add(m["project_name"])
-            return sorted(projects)
+            offset = 0
+            limit = 5000
+            while True:
+                results = self.collection.get(
+                    include=["metadatas"],
+                    limit=limit,
+                    offset=offset
+                )
+                if not results:
+                    break
+                    
+                metas = results.get("metadatas")
+                if not metas:
+                    break
+
+                for m in metas:
+                    if m and isinstance(m, dict) and m.get("project_name"):
+                        projects.add(m["project_name"])
+                
+                if len(metas) < limit:
+                    break
+                offset += limit
+            
+            project_list = sorted(list(projects))
+            logger.info("Found %d unique projects in index.", len(project_list))
+            return project_list
         except Exception as e:
             logger.error(
-                "Error listing projects: %s", e
+                "Error listing projects: %s", e, exc_info=True
             )
             return []
 

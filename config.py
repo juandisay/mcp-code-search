@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     MAX_DISTANCE: float = 2.0
     INITIAL_RETRIEVAL_COUNT: int = 15
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RE_RANK_LIMIT: int = 100
 
     model_config = {"env_file": ".env"}
 

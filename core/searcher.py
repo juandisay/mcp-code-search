@@ -1,5 +1,8 @@
 """Semantic search queries against ChromaDB."""
 import logging
+import sys
+import contextlib
+import concurrent.futures
 from typing import Any, Dict, List, Optional, Union
 
 import chromadb
@@ -8,6 +11,16 @@ from sentence_transformers import CrossEncoder
 from config import config
 
 logger = logging.getLogger(__name__)
+
+@contextlib.contextmanager
+def redirect_stdout_to_stderr():
+    """Redirect all stdout to stderr temporarily."""
+    original_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = original_stdout
 
 
 class CodeSearcher:
@@ -37,7 +50,8 @@ class CodeSearcher:
         
         # Initialize Cross-Encoder for two-stage reranking
         logger.info("Loading CrossEncoder model: %s", config.CROSS_ENCODER_MODEL)
-        self.cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL)
+        with redirect_stdout_to_stderr():
+            self.cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL)
 
     def search(
         self,
@@ -74,6 +88,10 @@ class CodeSearcher:
             initial_k = min(initial_k * 5, collection_count)
         else:
             initial_k = min(initial_k, collection_count)
+
+        # Sanity check: cap initial_k to prevent SQL variable limit errors (typically 999 or 32766)
+        # We'll use a safe 5000 to be conservative and prevent huge query overhead.
+        initial_k = max(1, min(initial_k, 5000))
 
 
         where_clause = None
@@ -121,6 +139,7 @@ class CodeSearcher:
             else [None] * len(docs)
         )
 
+        candidates: List[Dict[str, Any]] = []
         for doc, meta, dist in zip(
             docs, metas, distances
         ):
@@ -151,41 +170,48 @@ class CodeSearcher:
                 if skip:
                     continue
 
-            snippet = doc
-            # If doc is missing from DB, load it from the chunks folder
-            if not snippet and meta and meta.get("chunk_file"):
-                try:
-                    with open(
-                        meta["chunk_file"], "r", encoding="utf-8"
-                    ) as f:
-                        snippet = f.read()
-                except Exception as e:
-                    logger.warning(
-                        "Could not read chunk file %s: %s",
-                        meta["chunk_file"], e,
-                    )
-                    snippet = "[Content could not be loaded]"
-
-            formatted.append({
-                "snippet": snippet,
-                "file_path": meta.get(
-                    "file_path", ""
-                ),
-                "start_line": meta.get(
-                    "start_line", 0
-                ),
-                "project_name": meta.get(
-                    "project_name", ""
-                ),
-                "distance": dist,
+            candidates.append({
+                "doc": doc,
+                "meta": meta,
+                "distance": dist
             })
 
-        if not formatted:
+        if not candidates:
             return []
 
-        # Stage 2: Cross-Encoder Re-ranking
+        num_candidates = len(candidates)
+        if num_candidates > config.RE_RANK_LIMIT:
+            logger.info("Capping candidates from %d to %d for snippet loading and re-ranking", num_candidates, config.RE_RANK_LIMIT)
+            candidates = candidates[:config.RE_RANK_LIMIT]
+            
+        def _load_snippet(candidate: dict) -> dict:
+            meta = candidate["meta"]
+            doc = candidate["doc"]
+            
+            snippet = doc
+            if not snippet and meta and meta.get("chunk_file"):
+                try:
+                    with open(meta["chunk_file"], "r", encoding="utf-8") as f:
+                        snippet = f.read()
+                except Exception as e:
+                    logger.warning("Could not read chunk file %s: %s", meta["chunk_file"], e)
+                    snippet = "[Content could not be loaded]"
+                    
+            return {
+                "snippet": snippet,
+                "file_path": meta.get("file_path", ""),
+                "start_line": meta.get("start_line", 0),
+                "project_name": meta.get("project_name", ""),
+                "distance": candidate["distance"],
+            }
+
+        # Load snippets in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, len(candidates))) as executor:
+            formatted = list(executor.map(_load_snippet, candidates))
+        
         cross_inp = [[query, item["snippet"]] for item in formatted]
-        cross_scores = self.cross_encoder.predict(cross_inp)
+        with redirect_stdout_to_stderr():
+            cross_scores = self.cross_encoder.predict(cross_inp)
 
         for idx, score in enumerate(cross_scores):
             formatted[idx]["cross_encoder_score"] = float(score)
