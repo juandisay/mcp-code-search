@@ -11,6 +11,7 @@ from langchain_text_splitters import (
     Language,
 )
 from config import config
+from core.token_manager import token_manager
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,7 @@ class CodeIndexer:
         )
 
         total_chunks = 0
+        total_tokens = 0
         skipped = 0
         for file_path in files_to_process:
             try:
@@ -161,10 +163,11 @@ class CodeIndexer:
                 skipped += 1
                 continue
 
-            chunks = self._process_file(
+            chunks, tokens = self._process_file(
                 file_path, project_name
             )
             total_chunks += chunks
+            total_tokens += tokens
 
             if current_hash:
                 self._hash_cache[file_path] = current_hash
@@ -183,6 +186,7 @@ class CodeIndexer:
             ),
             "files_skipped": skipped,
             "chunks_upserted": total_chunks,
+            "total_tokens": total_tokens,
         }
 
     def list_projects(self) -> list[str]:
@@ -204,7 +208,7 @@ class CodeIndexer:
 
     def _process_file(
         self, file_path: str, project_name: str
-    ) -> int:
+    ) -> tuple[int, int]:
         """Read, chunk, and upsert a single file."""
         try:
             with open(
@@ -215,17 +219,17 @@ class CodeIndexer:
             logger.warning(
                 "Error reading %s: %s", file_path, e
             )
-            return 0
+            return 0, 0
 
         if not content.strip():
-            return 0
+            return 0, 0
 
         ext = Path(file_path).suffix
         splitter = self._get_splitter(ext)
         chunks = splitter.split_text(content)
 
         if not chunks:
-            return 0
+            return 0, 0
 
         documents = []
         metadatas = []
@@ -273,6 +277,7 @@ class CodeIndexer:
 
         # Batch upsert to reduce ChromaDB overhead
         total_upserted = 0
+        total_tokens = 0
         for start in range(
             0, len(documents), self.batch_size
         ):
@@ -282,6 +287,10 @@ class CodeIndexer:
             batch_ids = ids[start:end]
             
             try:
+                # Count tokens for this batch
+                for doc in batch_docs:
+                    total_tokens += token_manager.count_tokens(doc)
+
                 # Generate embeddings manually
                 embeddings = self.embedding_fn(batch_docs)
                 
@@ -298,4 +307,4 @@ class CodeIndexer:
                     file_path, e,
                 )
 
-        return total_upserted
+        return total_upserted, total_tokens

@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from config import config
 from core.indexer import CodeIndexer
 from core.searcher import CodeSearcher
+from core.token_manager import token_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,7 +71,10 @@ def semantic_code_search(
             f"Project: {proj}\n"
             f"Code:\n{res['snippet']}\n"
         )
-    return "\n".join(lines)
+    
+    output = "\n".join(lines)
+    total_tokens = token_manager.count_tokens(output)
+    return output + token_manager.format_usage_summary(total_tokens)
 
 
 @mcp.tool()
@@ -90,12 +94,17 @@ def index_folder(folder_path: str) -> str:
         summary = indexer.index_project_folder(
             folder_path
         )
+        # For indexing, we can't easily count tokens of everything 
+        # without reading it all again, but CodeIndexer already 
+        # has the content during processing.
+        # Let's just report success here.
         return (
             f"Successfully indexed: {folder_path}\n"
             f"Files processed: "
             f"{summary['files_processed']}, "
             f"Skipped: {summary['files_skipped']}, "
-            f"Chunks: {summary['chunks_upserted']}"
+            f"Chunks: {summary['chunks_upserted']}\n"
+            f"Total tokens indexed: {summary['total_tokens']}"
         )
     except Exception as e:
         return f"Error during indexing: {e}"
@@ -142,8 +151,8 @@ def _run_background_indexing(folder_path: str):
                 folder_path
             )
             logger.info(
-                "Auto-indexing done for %s — %s",
-                folder_path, summary,
+                "Auto-indexing done for %s — Chunks: %s, Tokens: %s",
+                folder_path, summary['chunks_upserted'], summary['total_tokens']
             )
         except Exception as e:
             logger.error(

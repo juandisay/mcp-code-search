@@ -31,3 +31,10 @@ description: Development & Indexing Workflow
 ## 5. Skills Capture
 - If a feature is identified as "usable", create a new skill in `.agents/skills/`.
 
+## 6. Token Usage Reporting
+- **Final Summary**: After providing any answer or completing a task, you MUST append a token usage summary in the following format:
+  
+  token usage:
+  search  <total_search_tokens_used>
+  llm usage <estimated_llm_tokens_used>
+

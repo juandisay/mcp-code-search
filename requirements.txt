@@ -7,3 +7,4 @@ langchain-text-splitters
 pydantic
 python-dotenv
 pydantic-settings
+tiktoken
