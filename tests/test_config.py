@@ -6,9 +6,9 @@ class TestConfig:
     """Tests for project configuration."""
 
     def test_default_chroma_data_path(self):
-        """Default CHROMA_DATA_PATH is 'data'."""
+        """Default CHROMA_DATA_PATH ends with 'data'."""
         s = Settings()
-        assert s.CHROMA_DATA_PATH == "data"
+        assert s.CHROMA_DATA_PATH.endswith("data")
 
     def test_default_chunk_size(self):
         """Default CHUNK_SIZE is 1000."""

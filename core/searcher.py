@@ -106,8 +106,24 @@ class CodeSearcher:
         ):
             if dist is not None and dist > threshold:
                 continue
+
+            snippet = doc
+            # If doc is missing from DB, load it from the chunks folder
+            if not snippet and meta and meta.get("chunk_file"):
+                try:
+                    with open(
+                        meta["chunk_file"], "r", encoding="utf-8"
+                    ) as f:
+                        snippet = f.read()
+                except Exception as e:
+                    logger.warning(
+                        "Could not read chunk file %s: %s",
+                        meta["chunk_file"], e,
+                    )
+                    snippet = "[Content could not be loaded]"
+
             formatted.append({
-                "snippet": doc,
+                "snippet": snippet,
                 "file_path": meta.get(
                     "file_path", ""
                 ),

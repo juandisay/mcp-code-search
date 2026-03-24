@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # ChromaDB Data Storage Directory
     CHROMA_DATA_PATH: str = str(_PROJECT_ROOT / "data")
 
+    # Local storage for text chunks (to keep sqlite file small)
+    CHUNKS_STORAGE_PATH: str = str(_PROJECT_ROOT / "data" / "chunks")
+
     # Optional: Automatically index this folder on startup
     PROJECT_FOLDER_TO_INDEX: str = ""
 
@@ -26,9 +29,9 @@ class Settings(BaseSettings):
 
     model_config = {"env_file": ".env"}
 
-    @field_validator("CHROMA_DATA_PATH")
+    @field_validator("CHROMA_DATA_PATH", "CHUNKS_STORAGE_PATH")
     @classmethod
-    def resolve_chroma_path(cls, v: str) -> str:
+    def resolve_paths(cls, v: str) -> str:
         """Resolve relative paths against project root."""
         p = Path(v)
         if not p.is_absolute():

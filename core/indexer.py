@@ -83,6 +83,9 @@ class CodeIndexer:
         self.chunk_overlap = chunk_overlap
         self.batch_size = batch_size
 
+        self.chunks_dir = Path(config.CHUNKS_STORAGE_PATH)
+        self.chunks_dir.mkdir(parents=True, exist_ok=True)
+
         self.supported_extensions = (
             set(EXTENSION_TO_LANGUAGE.keys())
             | GENERIC_EXTENSIONS
@@ -227,6 +230,7 @@ class CodeIndexer:
         documents = []
         metadatas = []
         ids = []
+        chunk_file_paths = []
 
         current_char_idx = 0
         for i, chunk in enumerate(chunks):
@@ -240,13 +244,24 @@ class CodeIndexer:
                 content.count("\n", 0, start_idx) + 1
             )
 
-            documents.append(chunk)
+            # Save chunk to disk instead of storage in SQLite
+            chunk_hash = hashlib.sha256(chunk.encode()).hexdigest()
+            chunk_file_path = self.chunks_dir / f"{chunk_hash}.txt"
+            
+            # Write chunk if it doesn't exist
+            if not chunk_file_path.exists():
+                with open(chunk_file_path, "w", encoding="utf-8") as f:
+                    f.write(chunk)
+
+            # documents.append(chunk) # We'll compute embeddings instead of storing docs
             metadatas.append({
                 "file_path": file_path,
                 "start_line": start_line,
                 "project_name": project_name,
+                "chunk_file": str(chunk_file_path),
             })
             ids.append(f"{file_path}_chunk_{i}")
+            documents.append(chunk) # still need this for embedding generation
 
             current_char_idx = (
                 start_idx
@@ -262,15 +277,21 @@ class CodeIndexer:
             0, len(documents), self.batch_size
         ):
             end = start + self.batch_size
+            batch_docs = documents[start:end]
+            batch_metas = metadatas[start:end]
+            batch_ids = ids[start:end]
+            
             try:
+                # Generate embeddings manually
+                embeddings = self.embedding_fn(batch_docs)
+                
+                # Upsert WITHOUT documents to save space in SQLite
                 self.collection.upsert(
-                    documents=documents[start:end],
-                    metadatas=metadatas[start:end],
-                    ids=ids[start:end],
+                    ids=batch_ids,
+                    embeddings=embeddings,
+                    metadatas=batch_metas,
                 )
-                total_upserted += len(
-                    documents[start:end]
-                )
+                total_upserted += len(batch_ids)
             except Exception as e:
                 logger.error(
                     "Error upserting batch for %s: %s",
