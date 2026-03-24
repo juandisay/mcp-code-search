@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # Searcher tuning (0.0=exact, 2.0=no filter)
     MAX_DISTANCE: float = 2.0
+    INITIAL_RETRIEVAL_COUNT: int = 15
+    CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     model_config = {"env_file": ".env"}
 

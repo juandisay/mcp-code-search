@@ -6,13 +6,16 @@
 
 ## Module Map
 
-| Module             | Role                                                         | Key Classes/Functions                   |
-| ------------------ | ------------------------------------------------------------ | --------------------------------------- |
-| `main.py`          | Entry point — runs as MCP server (`--mcp`) or FastAPI server | `mcp`, `app`, MCP tools, REST endpoints |
-| `config.py`        | Environment-based configuration via `pydantic-settings`      | `Settings`, `config`                    |
-| `core/indexer.py`  | File traversal, language-aware chunking, ChromaDB upsert     | `CodeIndexer`, `EXTENSION_TO_LANGUAGE`  |
-| `core/watcher.py`  | Real-time filesystem observer via `watchdog` for incremental indexing | `ProjectWatcher`, `IndexerEventHandler` |
-| `core/searcher.py` | Semantic vector search with filtering & relevance threshold  | `CodeSearcher`                          |
+| Module                 | Role                                                         | Key Classes/Functions                   |
+| ---------------------- | ------------------------------------------------------------ | --------------------------------------- |
+| `main.py`              | Entry point — runs as MCP server (`--mcp`) or FastAPI server | `mcp`, `app`, MCP tools, REST endpoints |
+| `config.py`            | Environment-based configuration via `pydantic-settings`      | `Settings`, `config`                    |
+| `core/indexer.py`      | File traversal, AST-aware chunking, ChromaDB upsert          | `CodeIndexer`                           |
+| `core/ast_chunker.py`  | Tree-sitter based AST-aware code chunking                    | `ASTChunker`, `EXTENSION_TO_TS_LANG`    |
+| `core/watcher.py`      | Real-time filesystem observer via `watchdog` for incremental indexing | `ProjectWatcher`, `IndexerEventHandler` |
+| `core/searcher.py`     | Semantic vector search with advanced metadata filtering      | `CodeSearcher`                          |
+| `core/token_manager.py`| Token usage tracking and reporting                           | `TokenManager`, `token_manager`         |
+| `core/rule_manager.py` | Agent rules initialization and sync                          | `rule_manager`                          |
 
 ---
 
@@ -22,12 +25,15 @@
 
 Search code using natural language queries.
 
-| Parameter      | Type      | Required | Default | Description                                                |
-| -------------- | --------- | -------- | ------- | ---------------------------------------------------------- |
-| `query`        | `string`  | ✅       | —       | Natural language description (e.g. _"S3 upload function"_) |
-| `n_results`    | `integer` | —        | `3`     | Max results to return                                      |
-| `project_name` | `string`  | —        | `null`  | Filter by project name                                     |
-| `max_distance` | `float`   | —        | `null`  | Override relevance threshold (lower = stricter)            |
+| Parameter            | Type             | Required | Default | Description                                                |
+| -------------------- | ---------------- | -------- | ------- | ---------------------------------------------------------- |
+| `query`              | `string`         | ✅       | —       | Natural language description (e.g. _"S3 upload function"_) |
+| `n_results`          | `integer`        | —        | `3`     | Max results to return                                      |
+| `project_name`       | `string`         | —        | `null`  | Filter by project name                                     |
+| `max_distance`       | `float`          | —        | `null`  | Override relevance threshold (lower = stricter)            |
+| `language`           | `list[string]`   | —        | `null`  | Filter by file extension(s) (e.g. `[".py", ".ts"]`)       |
+| `file_path_includes` | `string`         | —        | `null`  | Only match files whose path contains this substring        |
+| `excluded_dirs`      | `list[string]`   | —        | `null`  | Exclude results from these directories                     |
 
 ### `index_folder`
 
@@ -118,6 +124,9 @@ All settings via environment variables or `.env`:
 
 - **Lower `MAX_DISTANCE`** to `1.0`–`1.2` for stricter relevance (fewer but better results)
 - **Use `project_name` filter** to scope results to a specific codebase
+- **Use `language` filter** (e.g. `[".py"]`) to restrict results to specific file types in polyglot repos
+- **Use `file_path_includes`** (e.g. `"/core"`) to search only within a specific directory subtree
+- **Use `excluded_dirs`** (e.g. `["tests", "vendor"]`) to omit noisy directories from results
 - **Increase `n_results`** to `10` when exploring unfamiliar codebases
 
 ### Resource Management

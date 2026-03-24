@@ -19,6 +19,18 @@ def indexed_searcher(tmp_path_factory):
         "def greet(name):\n"
         "    return f'Hello, {name}'\n"
     )
+    (tmp / "app.ts").write_text(
+        "function addTs(a: number, b: number) {\n"
+        "    return a + b;\n"
+        "}\n"
+    )
+    secret_dir = tmp / "secret_dir"
+    secret_dir.mkdir()
+    (secret_dir / "hidden.py").write_text(
+        "def hidden_add(a, b):\n"
+        "    return a + b + 1\n"
+    )
+    
     indexer = CodeIndexer()
     indexer.index_project_folder(str(tmp))
     return CodeSearcher()
@@ -48,6 +60,7 @@ class TestCodeSearcher:
             assert "start_line" in r
             assert "project_name" in r
             assert "distance" in r
+            assert "cross_encoder_score" in r
 
     def test_search_empty_collection(self):
         """Searching an empty collection returns []."""
@@ -81,3 +94,29 @@ class TestCodeSearcher:
             "add", n_results=99999
         )
         assert isinstance(results, list)
+
+    def test_search_language_filter(self, indexed_searcher):
+        """Filtering by language returns only matching extensions."""
+        py_results = indexed_searcher.search("add", language=".py")
+        assert all(r["file_path"].endswith(".py") for r in py_results)
+        
+        ts_results = indexed_searcher.search("add", language=["ts"])
+        assert all(r["file_path"].endswith(".ts") for r in ts_results)
+        assert len(ts_results) > 0
+
+    def test_search_file_path_includes(self, indexed_searcher):
+        """Filtering by file_path_includes matches substring."""
+        results = indexed_searcher.search("add", file_path_includes="math_")
+        assert all("math_" in r["file_path"] for r in results)
+        assert len(results) > 0
+
+    def test_search_excluded_dirs(self, indexed_searcher):
+        """Filtering by excluded_dirs omits specified directories."""
+        # 'hidden_add' is in secret_dir
+        results_without_filter = indexed_searcher.search("hidden_add", n_results=5)
+        assert any("secret_dir" in r["file_path"] for r in results_without_filter)
+        
+        results_with_filter = indexed_searcher.search(
+            "hidden_add", n_results=5, excluded_dirs=["secret_dir"]
+        )
+        assert not any("secret_dir" in r["file_path"] for r in results_with_filter)

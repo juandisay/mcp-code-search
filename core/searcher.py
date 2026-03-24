@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import chromadb
 from chromadb.utils import embedding_functions
+from sentence_transformers import CrossEncoder
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ class CodeSearcher:
             )
         )
         self.max_distance = max_distance
+        
+        # Initialize Cross-Encoder for two-stage reranking
+        logger.info("Loading CrossEncoder model: %s", config.CROSS_ENCODER_MODEL)
+        self.cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL)
 
     def search(
         self,
@@ -42,6 +47,9 @@ class CodeSearcher:
             Union[str, List[str]]
         ] = None,
         max_distance: Optional[float] = None,
+        language: Optional[Union[str, List[str]]] = None,
+        file_path_includes: Optional[str] = None,
+        excluded_dirs: Optional[Union[str, List[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """Query ChromaDB for relevant code snippets.
 
@@ -50,11 +58,23 @@ class CodeSearcher:
             n_results: Max number of results.
             project_name: Filter by project(s).
             max_distance: Override distance threshold.
+            language: Filter by file extension(s).
+            file_path_includes: Require a specific substring in file path.
+            excluded_dirs: Exclude directories from search.
         """
         collection_count = self.collection.count()
         if collection_count == 0:
             return []
-        n_results = min(n_results, collection_count)
+            
+        # Stage 1: Fetch larger candidate pool
+        initial_k = max(n_results, config.INITIAL_RETRIEVAL_COUNT)
+        
+        if language or file_path_includes or excluded_dirs:
+            # Fetch more matches to offset post-retrieval filtering
+            initial_k = min(initial_k * 5, collection_count)
+        else:
+            initial_k = min(initial_k, collection_count)
+
 
         where_clause = None
         if project_name:
@@ -71,7 +91,7 @@ class CodeSearcher:
 
         results = self.collection.query(
             query_texts=[query],
-            n_results=n_results,
+            n_results=initial_k,
             where=where_clause,
             include=[
                 "documents", "metadatas", "distances"
@@ -106,6 +126,30 @@ class CodeSearcher:
         ):
             if dist is not None and dist > threshold:
                 continue
+                
+            file_path = meta.get("file_path", "")
+            
+            # Stage 1.5: Python-level Metadata Filtering
+            if language:
+                langs = language if isinstance(language, list) else [language]
+                langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
+                if not any(file_path.endswith(ext) for ext in langs):
+                    continue
+                    
+            if file_path_includes and file_path_includes not in file_path:
+                continue
+                
+            if excluded_dirs:
+                ex_dirs = excluded_dirs if isinstance(excluded_dirs, list) else [excluded_dirs]
+                skip = False
+                for ex_dir in ex_dirs:
+                    ex_dir_clean = ex_dir.strip('/')
+                    # Path boundary match so we don't accidentally exclude similar substrings
+                    if f"/{ex_dir_clean}/" in f"/{file_path.strip('/')}/":
+                        skip = True
+                        break
+                if skip:
+                    continue
 
             snippet = doc
             # If doc is missing from DB, load it from the chunks folder
@@ -136,4 +180,18 @@ class CodeSearcher:
                 "distance": dist,
             })
 
-        return formatted
+        if not formatted:
+            return []
+
+        # Stage 2: Cross-Encoder Re-ranking
+        cross_inp = [[query, item["snippet"]] for item in formatted]
+        cross_scores = self.cross_encoder.predict(cross_inp)
+
+        for idx, score in enumerate(cross_scores):
+            formatted[idx]["cross_encoder_score"] = float(score)
+
+        # Sort by cross-encoder score descending
+        formatted.sort(key=lambda x: x["cross_encoder_score"], reverse=True)
+
+        # Return top N
+        return formatted[:n_results]

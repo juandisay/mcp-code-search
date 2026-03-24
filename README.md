@@ -214,11 +214,15 @@ Once connected, AI clients can call these tools:
 
 Search for code snippets using natural language.
 
-| Parameter      | Type    | Required | Default | Description                                                  |
-| -------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
-| `query`        | string  | ✅       | —       | Natural language query, e.g. _"function that uploads to S3"_ |
-| `n_results`    | integer | —        | `3`     | Number of results to return                                  |
-| `project_name` | string  | —        | `null`  | Filter results by project name                               |
+| Parameter            | Type           | Required | Default | Description                                                  |
+| -------------------- | -------------- | -------- | ------- | ------------------------------------------------------------ |
+| `query`              | string         | ✅       | —       | Natural language query, e.g. _"function that uploads to S3"_ |
+| `n_results`          | integer        | —        | `3`     | Number of results to return                                  |
+| `project_name`       | string         | —        | `null`  | Filter results by project name                               |
+| `max_distance`       | float          | —        | `null`  | Override relevance threshold (lower = stricter)              |
+| `language`           | list\[string\] | —        | `null`  | Filter by file extension(s), e.g. `[".py", ".ts"]`          |
+| `file_path_includes` | string         | —        | `null`  | Only return results whose path contains this substring       |
+| `excluded_dirs`      | list\[string\] | —        | `null`  | Exclude results from these directories, e.g. `["tests"]`     |
 
 ### `index_folder`
 
@@ -261,7 +265,10 @@ If your client supports explicit tool invocation, you can call the tools directl
   "arguments": {
     "query": "function that uploads files to S3",
     "n_results": 5,
-    "project_name": "my-backend"
+    "project_name": "my-backend",
+    "language": [".py"],
+    "file_path_includes": "/core",
+    "excluded_dirs": ["tests", "vendor"]
   }
 }
 ```
@@ -350,11 +357,15 @@ mcp-code-search/
 ├── config.py            # Environment configuration (pydantic-settings)
 ├── core/
 │   ├── indexer.py       # Code chunking & ChromaDB indexing
-│   └── searcher.py      # Semantic search queries
+│   ├── searcher.py      # Semantic search with metadata filtering
+│   ├── ast_chunker.py   # AST-aware code chunking via Tree-sitter
+│   ├── watcher.py       # Real-time file watcher (watchdog)
+│   ├── token_manager.py # Token usage tracking
+│   └── rule_manager.py  # Agent rules sync
 ├── data/                # ChromaDB persistent storage (auto-created)
 ├── tests/
-│   └── dummy_project/   # Sample files for testing
-├── test_core.py         # Core engine test script
+│   ├── test_searcher.py # Searcher unit tests
+│   └── test_main.py     # MCP tool tests
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Environment template
 └── docs/

@@ -15,25 +15,10 @@ from core.token_manager import token_manager
 
 logger = logging.getLogger(__name__)
 
-# Map file extensions to LangChain Language enum
-# for smart chunking (PRD §4.1)
-EXTENSION_TO_LANGUAGE = {
-    ".py": Language.PYTHON,
-    ".js": Language.JS,
-    ".ts": Language.TS,
-    ".jsx": Language.JS,
-    ".tsx": Language.TS,
-    ".go": Language.GO,
-    ".java": Language.JAVA,
-    ".md": Language.MARKDOWN,
-    ".rb": Language.RUBY,
-    ".rs": Language.RUST,
-    ".php": Language.PHP,
-    ".c": Language.C,
-    ".cpp": Language.CPP,
-    ".cs": Language.CSHARP,
-    ".html": Language.HTML,
-}
+from core.ast_chunker import ASTChunker, EXTENSION_TO_TS_LANG
+
+# Supported extensions for AST chunking
+AST_SUPPORTED_EXTENSIONS = set(EXTENSION_TO_TS_LANG.keys())
 
 # Extensions without language-specific splitting
 GENERIC_EXTENSIONS = {
@@ -88,7 +73,7 @@ class CodeIndexer:
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
 
         self.supported_extensions = (
-            set(EXTENSION_TO_LANGUAGE.keys())
+            AST_SUPPORTED_EXTENSIONS
             | GENERIC_EXTENSIONS
         )
         self.excluded_dirs = {
@@ -102,19 +87,15 @@ class CodeIndexer:
         # In-memory hash cache: file_path -> sha256
         self._hash_cache: Dict[str, str] = {}
 
-    def _get_splitter(
-        self, ext: str
-    ) -> RecursiveCharacterTextSplitter:
-        """Return a language-specific or generic splitter."""
-        lang = EXTENSION_TO_LANGUAGE.get(ext)
-        if lang:
-            return (
-                RecursiveCharacterTextSplitter.from_language(
-                    language=lang,
-                    chunk_size=self.chunk_size,
-                    chunk_overlap=self.chunk_overlap,
-                )
+    def _get_splitter(self, ext: str):
+        """Return an AST-aware chunker or a generic fallback splitter."""
+        if ext in AST_SUPPORTED_EXTENSIONS:
+            return ASTChunker(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+                extension=ext
             )
+        
         return RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,

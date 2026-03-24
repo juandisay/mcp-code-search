@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from config import config
 from core.searcher import CodeSearcher
+from core.indexer import CodeIndexer
 from core.token_manager import token_manager
 from core.watcher import ProjectWatcher
 from core.rule_manager import rule_manager
@@ -42,6 +43,9 @@ def semantic_code_search(
     n_results: int = 3,
     project_name: str = None,
     max_distance: float = None,
+    language: list[str] = None,
+    file_path_includes: str = None,
+    excluded_dirs: list[str] = None,
 ) -> str:
     """Search for code snippets via NLP query.
 
@@ -50,9 +54,13 @@ def semantic_code_search(
         n_results: Number of results.
         project_name: Filter by project.
         max_distance: Relevance threshold.
+        language: Filter by file extension(s) (e.g. ['.py', '.ts']).
+        file_path_includes: Require a specific substring in file path.
+        excluded_dirs: Exclude directories from search (e.g. ['node_modules', 'tests']).
     """
     results = searcher.search(
-        query, n_results, project_name, max_distance
+        query, n_results, project_name, max_distance,
+        language=language, file_path_includes=file_path_includes, excluded_dirs=excluded_dirs
     )
     if not results:
         return "No relevant code snippets found."

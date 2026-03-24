@@ -1,5 +1,5 @@
 """Tests for core.indexer module."""
-from core.indexer import CodeIndexer, EXTENSION_TO_LANGUAGE
+from core.indexer import CodeIndexer, AST_SUPPORTED_EXTENSIONS
 
 
 class TestCodeIndexer:
@@ -86,7 +86,7 @@ class TestCodeIndexer:
     def test_extension_to_language_map(self):
         """Language map covers core extensions."""
         for ext in (".py", ".js", ".ts", ".go", ".java"):
-            assert ext in EXTENSION_TO_LANGUAGE
+            assert ext in AST_SUPPORTED_EXTENSIONS
 
     def test_custom_chunk_params(self):
         """Indexer respects custom chunk params."""
