@@ -11,6 +11,7 @@
 | `main.py`          | Entry point — runs as MCP server (`--mcp`) or FastAPI server | `mcp`, `app`, MCP tools, REST endpoints |
 | `config.py`        | Environment-based configuration via `pydantic-settings`      | `Settings`, `config`                    |
 | `core/indexer.py`  | File traversal, language-aware chunking, ChromaDB upsert     | `CodeIndexer`, `EXTENSION_TO_LANGUAGE`  |
+| `core/watcher.py`  | Real-time filesystem observer via `watchdog` for incremental indexing | `ProjectWatcher`, `IndexerEventHandler` |
 | `core/searcher.py` | Semantic vector search with filtering & relevance threshold  | `CodeSearcher`                          |
 
 ---
@@ -108,6 +109,7 @@ All settings via environment variables or `.env`:
 
 ### Indexing Performance
 
+- **Real-Time Watcher** — The MCP server runs a background watcher. Once indexed, saving or deleting a file automatically patches ChromaDB precisely without full folder scans.
 - **Skip unchanged files** — Enabled automatically via hash caching; re-indexing a folder only processes modified files
 - **Batch size** — Increase `BATCH_SIZE` for large projects (500–1000) to reduce I/O overhead
 - **Chunk tuning** — Increase `CHUNK_SIZE` (e.g. 1500) for dense code; decrease for small utility functions

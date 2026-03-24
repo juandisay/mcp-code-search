@@ -189,6 +189,55 @@ class CodeIndexer:
             "total_tokens": total_tokens,
         }
 
+    def delete_file(self, file_path: str):
+        """Remove all chunks associated with a specific file_path."""
+        query_result = self.collection.get(
+            where={"file_path": file_path},
+            include=["metadatas"]
+        )
+        
+        if not query_result or not query_result.get("ids"):
+            return
+            
+        ids_to_delete = query_result["ids"]
+        metadatas = query_result["metadatas"]
+        
+        # Delete from ChromaDB
+        self.collection.delete(ids=ids_to_delete)
+        logger.info("Deleted %d chunks for %s from ChromaDB", len(ids_to_delete), file_path)
+        
+        # Delete chunk text files from blob storage
+        for meta in (metadatas or []):
+            if meta and meta.get("chunk_file"):
+                chunk_path = Path(meta["chunk_file"])
+                if chunk_path.exists():
+                    try:
+                        chunk_path.unlink()
+                    except Exception as e:
+                        logger.warning("Failed to delete chunk file %s: %s", chunk_path, e)
+                        
+        # Remove from hash cache if present
+        self._hash_cache.pop(file_path, None)
+
+    def update_file(self, file_path: str, project_name: str) -> dict:
+        """Clean up old chunks and re-index a single file."""
+        self.delete_file(file_path)
+        
+        if not os.path.exists(file_path):
+            return {"chunks_upserted": 0, "total_tokens": 0}
+            
+        try:
+            current_hash = _file_hash(file_path)
+        except Exception:
+            current_hash = None
+            
+        chunks, tokens = self._process_file(file_path, project_name)
+        
+        if current_hash:
+            self._hash_cache[file_path] = current_hash
+            
+        return {"chunks_upserted": chunks, "total_tokens": tokens}
+
     def list_projects(self) -> list[str]:
         """Return unique project names from metadata."""
         try:

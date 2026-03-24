@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
 
 from config import config
-from core.indexer import CodeIndexer
 from core.searcher import CodeSearcher
 from core.token_manager import token_manager
+from core.watcher import ProjectWatcher
+from core.rule_manager import rule_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------- #
 indexer = CodeIndexer()
 searcher = CodeSearcher()
+watcher = ProjectWatcher(indexer)
 
 # --------------------------------------------------------- #
 #  MCP Server                                               #
@@ -94,6 +96,8 @@ def index_folder(folder_path: str) -> str:
         summary = indexer.index_project_folder(
             folder_path
         )
+        # Start watching after initial index
+        watcher.start(folder_path)
         # For indexing, we can't easily count tokens of everything 
         # without reading it all again, but CodeIndexer already 
         # has the content during processing.
@@ -138,6 +142,33 @@ def get_index_stats() -> str:
     )
 
 
+@mcp.tool()
+def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
+    """Initialize or update Antigravity agent rules for a project based on its detected stack.
+    
+    Args:
+        folder_path: Absolute path to the project.
+        context_notes: Additional custom requirements or context to inject.
+    """
+    if not os.path.isdir(folder_path):
+        return f"Error: '{folder_path}' does not exist or is not a directory."
+        
+    try:
+        overview = rule_manager.sync_rules(folder_path, context_notes)
+        init_str = ", ".join(overview["initialized"]) or "None"
+        up_str = ", ".join(overview["updated"]) or "None"
+        skip_str = ", ".join(overview["skipped"]) or "None"
+        
+        return (
+            f"Rule Sync Complete for {folder_path}\n"
+            f"Initialized: {init_str}\n"
+            f"Updated: {up_str}\n"
+            f"Skipped: {skip_str}"
+        )
+    except Exception as e:
+        return f"Error syncing rules: {e}"
+
+
 # --------------------------------------------------------- #
 #  FastAPI Server (Management Layer)                        #
 # --------------------------------------------------------- #
@@ -154,6 +185,8 @@ def _run_background_indexing(folder_path: str):
                 "Auto-indexing done for %s — Chunks: %s, Tokens: %s",
                 folder_path, summary['chunks_upserted'], summary['total_tokens']
             )
+            # Start watching after initial index
+            watcher.start(folder_path)
         except Exception as e:
             logger.error(
                 "Error during auto-indexing: %s", e
@@ -176,6 +209,8 @@ async def lifespan(app: FastAPI):
             config.PROJECT_FOLDER_TO_INDEX,
         )
     yield
+    if 'watcher' in globals() and watcher:
+        watcher.stop()
 
 
 app = FastAPI(
@@ -190,6 +225,13 @@ class IndexRequest(BaseModel):
     """POST /index request body."""
 
     folder_path: str
+
+
+class SyncRequest(BaseModel):
+    """POST /sync-rules request body."""
+
+    folder_path: str
+    context_notes: str = ""
 
 
 @app.post("/index")
@@ -225,6 +267,22 @@ async def api_stats():
         "chroma_data_path": config.CHROMA_DATA_PATH,
         "indexed_projects": projects,
     }
+
+
+@app.post("/sync-rules")
+async def api_sync_rules(req: SyncRequest):
+    """Trigger agent rules initialization/updating."""
+    if not os.path.isdir(req.folder_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid folder path",
+        )
+        
+    try:
+        overview = rule_manager.sync_rules(req.folder_path, req.context_notes)
+        return {"message": "Rules synced", "overview": overview}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --------------------------------------------------------- #

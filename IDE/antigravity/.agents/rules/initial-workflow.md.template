@@ -7,7 +7,7 @@
 
 ## 🛠️ Mandatory Indexing
 - At the start of every chat session, you **MUST** call the `code-memory` tool `index_folder` with the current project path.
-- **AUTOMATIC RE-INDEXING**: After every code implementation, modification, or creation, you **MUST** immediately re-trigger `index_folder` to ensure the vector database is always up-to-date.
+- **REAL-TIME WATCHER**: There is an automatic filesystem watcher running in the background. You **DO NOT** need to re-trigger `index_folder` manually after creating or modifying code; the server incrementally indexes changes automatically.
 
 ## 🔍 Context-First Policy (MANDATORY)
 - Before planning any task or proposing changes, you **MUST** use `semantic_code_search` from `code-memory` to gather context about existing implementations.
