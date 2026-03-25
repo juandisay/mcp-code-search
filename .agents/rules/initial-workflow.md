@@ -1,26 +1,24 @@
-# Initial Workflow & RAG Rules (MANDATORY)
+# Initial Workflow & Context Rules (MANDATORY)
 
 ## 🚫 No Direct Project Analysis
 - **DO NOT** analyze the project by manually listing directories or reading multiple files to "understand the project logic" directly.
-- You MUST leverage the `code-memory` MCP for all project understanding and context gathering.
-- **Noise Filtering**: Ignore `node_modules`, `.git`, `dist`, `build`, and other artifact folders during any direct scanning or inference.
+- You MUST leverage the `code-memory` MCP for project understanding.
+- **Noise Filtering**: Ignore `node_modules`, `.git`, `dist`, `build` during any interaction.
 
-## 🛠️ Mandatory Indexing
-- At the start of every chat session, you **MUST** call the `code-memory` tool `index_folder` with the current project path.
-- **REAL-TIME WATCHER**: There is an automatic filesystem watcher running in the background. You **DO NOT** need to re-trigger `index_folder` manually after creating or modifying code; the server incrementally indexes changes automatically.
+## 🛠️ Automated Indexing
+- **Real-time Watcher**: A background filesystem watcher is active. You **DO NOT** need to call `index_folder` manually after creating or modifying code. The server handles incremental updates automatically.
+- **Session Start**: Only call `index_folder` at the very start of a NEW chat session if you suspect the index is out of sync.
 
 ## 🔍 Context-First Policy (MANDATORY)
-- Before planning any task or proposing changes, you **MUST** use `semantic_code_search` from `code-memory` to gather context about existing implementations.
-- **Multiple Views**: If `semantic_code_search` is insufficient, use `grep_search` to find literal strings (constants, API keys, or specific imports).
-- **Dependency Map**: Before modification, identify reverse dependencies (files that import the target file) to prevent breaking changes.
-- Do not make assumptions about the codebase. Context checking through `code-memory` is a mandatory requirement.
+- **Targeted Search**: Before planning or proposing changes, use `semantic_code_search` to gather context.
+- **Efficiency**: Instead of multiple broad searches, try to combine keywords into 1 or 2 high-quality queries to save context tokens.
+- **Dependency Map**: Identify critical imports or reverse dependencies using `grep_search` ONLY when semantic search is insufficient.
+- Do not make assumptions. Use code-memory context efficiently.
 
 ## 📦 Automated Skill Management
-- **Skill Reuse**: BEFORE creating new logic, check `.agents/skills/` to reuse existing modular components.
-- When you create logic that is considered "usable" or "modular", save it as a new skill in `.agents/skills/[skill-name].md`.
-- Each skill file must include description, implementation details, and reuse instructions.
+- **Skill Reuse**: Check `.agents/skills/` before creating new logic.
+- **Skill Capture**: Save reusable or modular logic to `.agents/skills/[skill-name].md`.
 
 ## 📝 Documentation & Planning
-- Every task MUST start with a detailed implementation plan.
-- Every piece of logic created MUST be accompanied by comprehensive documentation.
-
+- Every task MUST start with a concise implementation plan.
+- Every piece of logic MUST be accompanied by documentation.

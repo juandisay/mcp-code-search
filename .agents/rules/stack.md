@@ -27,8 +27,8 @@
 
 ## 📜 Coding Guidelines
 - **PEP 8**: Wajib diikuti untuk kebersihan kode Python.
-- **Type Hinting**: Gunakan type hints pada setiap fungsi dan variabel (Pydantic models sangat disarankan).
+- **Type Hinting**: Gunakan type hints pada setiap fungsi dan variabel.
 - **Docstrings**: Setiap class dan function baru wajib memiliki docstring deskriptif.
-- **RAG Validation**: Selalu lakukan `index_folder` setelah modifikasi file di `core/` atau `main.py`.
+- **Automatic Sync**: Indexing dikelola otomatis oleh background watcher.
 
 
