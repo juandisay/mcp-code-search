@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RE_RANK_LIMIT: int = 100
 
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("CHROMA_DATA_PATH", "CHUNKS_STORAGE_PATH")
     @classmethod
