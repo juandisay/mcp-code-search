@@ -5,9 +5,10 @@
 - You MUST leverage the `code-memory` MCP for project understanding.
 - **Noise Filtering**: Ignore `node_modules`, `.git`, `dist`, `build` during any interaction.
 
-## 🛠️ Automated Indexing
-- **Real-time Watcher**: A background filesystem watcher is usually active in projects. You **DO NOT** need to call `index_folder` manually after creating or modifying code if a watcher is running.
-- **Session Start**: Only call `index_folder` at the very start of a NEW chat session if the index seems out of sync.
+## 🛠️ Performance & Memory
+- **Mandatory Indexing**: Call `mcp_code-memory_index_folder` at the very start of every new session to ensure the "Brain" is up-to-date.
+- **Post-Action Indexing**: Always re-index the project after creating or modifying code files to maintain sync.
+- **Brain Mode**: Treat `code-memory` as the primary source of truth for project structure and logic. Avoid manual directory exploration unless semantic search fails.
 
 ## 🔍 Context-First Policy (MANDATORY)
 - **Targeted Search**: Before planning or proposing changes, use `semantic_code_search` to gather context.

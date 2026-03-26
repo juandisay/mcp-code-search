@@ -4,8 +4,9 @@ description: Development & Indexing Workflow
 
 # Development Workflow (MANDATORY)
 
-## 1. Managed Indexing
-- **Automatic Sync**: The system handles indexing in the background. Do NOT manually call `index_folder` during implementation unless the automatic sync fails or a full re-index is requested.
+## 1. Brain Synchronization (MANDATORY)
+- **Initial Sync**: Ensure indexing is complete at the start of any response to guarantee a fresh "Brain".
+- **Final Sync**: Always call `mcp_code-memory_index_folder` as the last step of every completion, ensuring everything is indexed correctly for the next interaction.
 
 ## 2. Optimized Search & Context
 - **Selective Search**: Perform semantic search to understand existing patterns before editing.
