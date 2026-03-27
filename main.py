@@ -28,12 +28,14 @@ _indexer = None
 _searcher = None
 _watcher = None
 
+
 def get_indexer():
     global _indexer
     if _indexer is None:
         from core.indexer import CodeIndexer
         _indexer = CodeIndexer()
     return _indexer
+
 
 def get_searcher():
     global _searcher
@@ -42,12 +44,14 @@ def get_searcher():
         _searcher = CodeSearcher()
     return _searcher
 
+
 def get_watcher():
     global _watcher
     if _watcher is None:
         from core.watcher import ProjectWatcher
         _watcher = ProjectWatcher(get_indexer())
     return _watcher
+
 
 # --------------------------------------------------------- #
 #  MCP Server                                               #
@@ -74,11 +78,12 @@ def semantic_code_search(
         max_distance: Relevance threshold.
         language: Filter by file extension(s) (e.g. ['.py', '.ts']).
         file_path_includes: Require a specific substring in file path.
-        excluded_dirs: Exclude directories from search (e.g. ['node_modules', 'tests']).
+        excluded_dirs: Exclude dirs from search (e.g. ['node_modules']).
     """
     results = get_searcher().search(
         query, n_results, project_name, max_distance,
-        language=language, file_path_includes=file_path_includes, excluded_dirs=excluded_dirs
+        language=language, file_path_includes=file_path_includes,
+        excluded_dirs=excluded_dirs
     )
     if not results:
         return "No relevant code snippets found."
@@ -99,7 +104,7 @@ def semantic_code_search(
             f"Project: {proj}\n"
             f"Code:\n{res['snippet']}\n"
         )
-    
+
     output = "\n".join(lines)
     total_tokens = token_manager.count_tokens(output)
     return output + token_manager.format_usage_summary(total_tokens)
@@ -124,8 +129,8 @@ def index_folder(folder_path: str) -> str:
         )
         # Start watching after initial index
         get_watcher().start(folder_path)
-        # For indexing, we can't easily count tokens of everything 
-        # without reading it all again, but CodeIndexer already 
+        # For indexing, we can't easily count tokens of everything
+        # without reading it all again, but CodeIndexer already
         # has the content during processing.
         # Let's just report success here.
         return (
@@ -152,6 +157,27 @@ def list_indexed_projects() -> str:
 
 
 @mcp.tool()
+def delete_project(project_name: str) -> str:
+    """Delete an indexed project and all its data.
+
+    Args:
+        project_name: Name of the project to delete.
+    """
+    try:
+        summary = get_indexer().delete_project(project_name)
+        if summary["deleted_chunks"] == 0:
+            return f"Project '{project_name}' not found or already empty."
+
+        return (
+            f"Successfully deleted project: {project_name}\n"
+            f"Chunks removed: {summary['deleted_chunks']}\n"
+            f"Files removed from index: {summary['deleted_files']}"
+        )
+    except Exception as e:
+        return f"Error deleting project: {e}"
+
+
+@mcp.tool()
 def get_index_stats() -> str:
     """Get code search index statistics."""
     collection = get_indexer().collection
@@ -170,21 +196,21 @@ def get_index_stats() -> str:
 
 @mcp.tool()
 def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
-    """Initialize or update Antigravity agent rules for a project based on its detected stack.
-    
+    """Init or update Antigravity agent rules based on its detected stack.
+
     Args:
         folder_path: Absolute path to the project.
         context_notes: Additional custom requirements or context to inject.
     """
     if not os.path.isdir(folder_path):
         return f"Error: '{folder_path}' does not exist or is not a directory."
-        
+
     try:
         overview = rule_manager.sync_rules(folder_path, context_notes)
         init_str = ", ".join(overview["initialized"]) or "None"
         up_str = ", ".join(overview["updated"]) or "None"
         skip_str = ", ".join(overview["skipped"]) or "None"
-        
+
         return (
             f"Rule Sync Complete for {folder_path}\n"
             f"Initialized: {init_str}\n"
@@ -209,7 +235,9 @@ def _run_background_indexing(folder_path: str):
             )
             logger.info(
                 "Auto-indexing done for %s — Chunks: %s, Tokens: %s",
-                folder_path, summary['chunks_upserted'], summary['total_tokens']
+                folder_path,
+                summary['chunks_upserted'],
+                summary['total_tokens']
             )
             # Start watching after initial index
             get_watcher().start(folder_path)
@@ -235,7 +263,6 @@ async def lifespan(app: FastAPI):
             config.PROJECT_FOLDER_TO_INDEX,
         )
     yield
-    global _watcher
     if _watcher:
         _watcher.stop()
 
@@ -296,6 +323,16 @@ async def api_stats():
     }
 
 
+@app.delete("/projects/{project_name}")
+async def api_delete_project(project_name: str):
+    """Delete an indexed project."""
+    try:
+        summary = get_indexer().delete_project(project_name)
+        return {"message": "Project deleted", "summary": summary}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/sync-rules")
 async def api_sync_rules(req: SyncRequest):
     """Trigger agent rules initialization/updating."""
@@ -304,7 +341,7 @@ async def api_sync_rules(req: SyncRequest):
             status_code=400,
             detail="Invalid folder path",
         )
-        
+
     try:
         overview = rule_manager.sync_rules(req.folder_path, req.context_notes)
         return {"message": "Rules synced", "overview": overview}
