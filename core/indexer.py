@@ -49,8 +49,10 @@ class CodeIndexer:
             chunk_overlap: Overlap between chunks.
             batch_size: Chunks per upsert batch.
         """
+        from chromadb.config import Settings
         self.chroma_client = chromadb.PersistentClient(
-            path=config.CHROMA_DATA_PATH
+            path=config.CHROMA_DATA_PATH,
+            settings=Settings(anonymized_telemetry=False)
         )
         self.embedding_fn = (
             embedding_functions.DefaultEmbeddingFunction()
@@ -268,11 +270,18 @@ class CodeIndexer:
             offset = 0
             limit = 5000
             while True:
-                results = self.collection.get(
-                    include=["metadatas"],
-                    limit=limit,
-                    offset=offset
-                )
+                try:
+                    results = self.collection.get(
+                        include=["metadatas"],
+                        limit=limit,
+                        offset=offset
+                    )
+                except Exception as inner_e:
+                    logger.error(
+                        "Error fetching projects at offset %d: %s",
+                        offset, inner_e
+                    )
+                    break
                 if not results:
                     break
 
