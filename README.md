@@ -93,8 +93,8 @@ Edit your Claude Desktop config file:
 {
   "mcpServers": {
     "code-memory": {
-      "command": "/absolute/path/to/mcp-code-search/venv/bin/python",
-      "args": ["/absolute/path/to/mcp-code-search/main.py", "--mcp"],
+      "command": "/absolute/path/to/mcp-code-search/run_mcp.sh",
+      "args": [],
       "env": {
         "CHROMA_DATA_PATH": "data",
         "PROJECT_FOLDER_TO_INDEX": "/path/to/your/project"
@@ -116,8 +116,8 @@ Open **Settings → MCP** (or `Cmd+Shift+P` → "MCP: Add Server"), then add:
 {
   "mcpServers": {
     "code-memory": {
-      "command": "/absolute/path/to/mcp-code-search/venv/bin/python",
-      "args": ["/absolute/path/to/mcp-code-search/main.py", "--mcp"],
+      "command": "/absolute/path/to/mcp-code-search/run_mcp.sh",
+      "args": [],
       "env": {
         "CHROMA_DATA_PATH": "data",
         "PROJECT_FOLDER_TO_INDEX": "/path/to/your/project"
@@ -141,8 +141,8 @@ Edit your Antigravity settings file:
 {
   "mcpServers": {
     "code-memory": {
-      "command": "/absolute/path/to/mcp-code-search/venv/bin/python",
-      "args": ["/absolute/path/to/mcp-code-search/main.py", "--mcp"],
+      "command": "/absolute/path/to/mcp-code-search/run_mcp.sh",
+      "args": [],
       "env": {
         "CHROMA_DATA_PATH": "data",
         "PROJECT_FOLDER_TO_INDEX": "/path/to/your/project"
@@ -162,8 +162,8 @@ Add to your Windsurf MCP configuration (`~/.windsurf/mcp.json` or via Settings):
 {
   "mcpServers": {
     "code-memory": {
-      "command": "/absolute/path/to/mcp-code-search/venv/bin/python",
-      "args": ["/absolute/path/to/mcp-code-search/main.py", "--mcp"]
+      "command": "/absolute/path/to/mcp-code-search/run_mcp.sh",
+      "args": []
     }
   }
 }
@@ -180,8 +180,8 @@ Add to `.vscode/mcp.json` in your workspace:
   "servers": {
     "code-memory": {
       "type": "stdio",
-      "command": "/absolute/path/to/mcp-code-search/venv/bin/python",
-      "args": ["/absolute/path/to/mcp-code-search/main.py", "--mcp"]
+      "command": "/absolute/path/to/mcp-code-search/run_mcp.sh",
+      "args": []
     }
   }
 }
@@ -200,8 +200,8 @@ npx @modelcontextprotocol/inspector
 Then connect to:
 
 ```
-Command: /absolute/path/to/venv/bin/python
-Args:    /absolute/path/to/main.py --mcp
+Command: /absolute/path/to/run_mcp.sh
+Args:    
 ```
 
 ---

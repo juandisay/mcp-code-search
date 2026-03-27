@@ -1,5 +1,6 @@
 """Entry point — FastAPI management + MCP server."""
 import os
+import sys
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -12,8 +13,12 @@ from config import config
 from core.token_manager import token_manager
 from core.rule_manager import rule_manager
 
+# When running as MCP stdio server, ALL logging MUST go to stderr.
+# Writing anything to stdout corrupts the JSON-RPC framing and causes EOF.
+_MCP_MODE = "--mcp" in sys.argv
 logging.basicConfig(
     level=logging.INFO,
+    stream=sys.stderr,          # <-- critical: stderr only
     format=(
         "%(asctime)s [%(levelname)s]"
         " %(name)s: %(message)s"
