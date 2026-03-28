@@ -73,6 +73,7 @@ def semantic_code_search(
     language: list[str] = None,
     file_path_includes: str = None,
     excluded_dirs: list[str] = None,
+    re_rank: bool = None,
 ) -> str:
     """Search for code snippets via NLP query.
 
@@ -84,11 +85,12 @@ def semantic_code_search(
         language: Filter by file extension(s) (e.g. ['.py', '.ts']).
         file_path_includes: Require a specific substring in file path.
         excluded_dirs: Exclude dirs from search (e.g. ['node_modules']).
+        re_rank: Whether to use cross-encoder reranking.
     """
     results = get_searcher().search(
         query, n_results, project_name, max_distance,
         language=language, file_path_includes=file_path_includes,
-        excluded_dirs=excluded_dirs
+        excluded_dirs=excluded_dirs, re_rank=re_rank
     )
     if not results:
         return "No relevant code snippets found."

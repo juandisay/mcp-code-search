@@ -12,6 +12,17 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# Detect hardware acceleration for Mac (MPS)
+_DEVICE = "cpu"
+if sys.platform == "darwin":
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            _DEVICE = "mps"
+    except ImportError:
+        pass
+
+
 @contextlib.contextmanager
 def redirect_stdout_to_stderr():
     """Redirect all stdout to stderr temporarily."""
@@ -47,11 +58,16 @@ class CodeSearcher:
             )
         )
         self.max_distance = max_distance
-        
-        # Initialize Cross-Encoder for two-stage reranking
-        logger.info("Loading CrossEncoder model: %s", config.CROSS_ENCODER_MODEL)
-        with redirect_stdout_to_stderr():
-            self.cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL)
+        self._cross_encoder = None
+
+    @property
+    def cross_encoder(self):
+        """Lazy-load the Cross-Encoder model only when needed."""
+        if self._cross_encoder is None:
+            logger.info("Loading CrossEncoder model: %s on device: %s", config.CROSS_ENCODER_MODEL, _DEVICE)
+            with redirect_stdout_to_stderr():
+                self._cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL, device=_DEVICE)
+        return self._cross_encoder
 
     def search(
         self,
@@ -64,6 +80,7 @@ class CodeSearcher:
         language: Optional[Union[str, List[str]]] = None,
         file_path_includes: Optional[str] = None,
         excluded_dirs: Optional[Union[str, List[str]]] = None,
+        re_rank: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """Query ChromaDB for relevant code snippets.
 
@@ -75,37 +92,51 @@ class CodeSearcher:
             language: Filter by file extension(s).
             file_path_includes: Require a specific substring in file path.
             excluded_dirs: Exclude directories from search.
+            re_rank: Whether to use cross-encoder reranking.
         """
         collection_count = self.collection.count()
         if collection_count == 0:
             return []
             
-        # Stage 1: Fetch larger candidate pool
-        initial_k = max(n_results, config.INITIAL_RETRIEVAL_COUNT)
+        should_re_rank = re_rank if re_rank is not None else config.USE_RERANKER
         
-        if language or file_path_includes or excluded_dirs:
-            # Fetch more matches to offset post-retrieval filtering
-            initial_k = min(initial_k * 5, collection_count)
+        # Stage 1: Fetch larger candidate pool if re-ranking, or exactly n_results if not
+        if should_re_rank:
+            initial_k = max(n_results, config.RE_RANK_LIMIT)
         else:
-            initial_k = min(initial_k, collection_count)
+            initial_k = n_results
+        
+        # Adjust k if we have filters that might be applied in Python
+        if file_path_includes or excluded_dirs:
+             initial_k = min(initial_k * 5, collection_count, 5000)
+        else:
+             initial_k = min(initial_k, collection_count)
 
-        # Sanity check: cap initial_k to prevent SQL variable limit errors (typically 999 or 32766)
-        # We'll use a safe 5000 to be conservative and prevent huge query overhead.
-        initial_k = max(1, min(initial_k, 5000))
+        initial_k = max(1, initial_k)
 
-
-        where_clause = None
+        # Build native where clause
+        where_conditions = []
+        
         if project_name:
             if isinstance(project_name, list):
-                where_clause = {
-                    "project_name": {
-                        "$in": project_name
-                    }
-                }
+                where_conditions.append({"project_name": {"$in": project_name}})
             else:
-                where_clause = {
-                    "project_name": project_name
-                }
+                where_conditions.append({"project_name": project_name})
+        
+        # Native language filtering (requires 'extension' field in metadata)
+        if language:
+            langs = language if isinstance(language, list) else [language]
+            langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
+            if len(langs) == 1:
+                where_conditions.append({"extension": langs[0]})
+            else:
+                where_conditions.append({"extension": {"$in": langs}})
+
+        where_clause = None
+        if len(where_conditions) == 1:
+            where_clause = where_conditions[0]
+        elif len(where_conditions) > 1:
+            where_clause = {"$and": where_conditions}
 
         results = self.collection.query(
             query_texts=[query],
@@ -122,52 +153,28 @@ class CodeSearcher:
             else self.max_distance
         )
 
-        formatted: List[Dict[str, Any]] = []
         docs_list = (results or {}).get("documents")
         if not docs_list or not docs_list[0]:
-            return formatted
+            return []
 
         docs = docs_list[0]
-        metas = (
-            results["metadatas"][0]
-            if results.get("metadatas")
-            else [{}] * len(docs)
-        )
-        distances = (
-            results["distances"][0]
-            if results.get("distances")
-            else [None] * len(docs)
-        )
+        metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
+        distances = results["distances"][0] if results.get("distances") else [None] * len(docs)
 
         candidates: List[Dict[str, Any]] = []
-        for doc, meta, dist in zip(
-            docs, metas, distances
-        ):
+        for doc, meta, dist in zip(docs, metas, distances):
             if dist is not None and dist > threshold:
                 continue
                 
             file_path = meta.get("file_path", "")
             
-            # Stage 1.5: Python-level Metadata Filtering
-            if language:
-                langs = language if isinstance(language, list) else [language]
-                langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
-                if not any(file_path.endswith(ext) for ext in langs):
-                    continue
-                    
+            # Stage 1.5: Python-level Filtering (for things not in where clause)
             if file_path_includes and file_path_includes not in file_path:
                 continue
                 
             if excluded_dirs:
                 ex_dirs = excluded_dirs if isinstance(excluded_dirs, list) else [excluded_dirs]
-                skip = False
-                for ex_dir in ex_dirs:
-                    ex_dir_clean = ex_dir.strip('/')
-                    # Path boundary match so we don't accidentally exclude similar substrings
-                    if f"/{ex_dir_clean}/" in f"/{file_path.strip('/')}/":
-                        skip = True
-                        break
-                if skip:
+                if any(f"/{d.strip('/')}/" in f"/{file_path.strip('/')}/" for d in ex_dirs):
                     continue
 
             candidates.append({
@@ -179,24 +186,17 @@ class CodeSearcher:
         if not candidates:
             return []
 
-        num_candidates = len(candidates)
-        if num_candidates > config.RE_RANK_LIMIT:
-            logger.info("Capping candidates from %d to %d for snippet loading and re-ranking", num_candidates, config.RE_RANK_LIMIT)
-            candidates = candidates[:config.RE_RANK_LIMIT]
-            
+        # Load snippets in parallel
         def _load_snippet(candidate: dict) -> dict:
             meta = candidate["meta"]
             doc = candidate["doc"]
-            
             snippet = doc
             if not snippet and meta and meta.get("chunk_file"):
                 try:
                     with open(meta["chunk_file"], "r", encoding="utf-8") as f:
                         snippet = f.read()
-                except Exception as e:
-                    logger.warning("Could not read chunk file %s: %s", meta["chunk_file"], e)
+                except Exception:
                     snippet = "[Content could not be loaded]"
-                    
             return {
                 "snippet": snippet,
                 "file_path": meta.get("file_path", ""),
@@ -205,10 +205,14 @@ class CodeSearcher:
                 "distance": candidate["distance"],
             }
 
-        # Load snippets in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, len(candidates))) as executor:
             formatted = list(executor.map(_load_snippet, candidates))
         
+        if not should_re_rank:
+            # Already sorted by distance from ChromaDB
+            return formatted[:n_results]
+
+        # Re-ranking stage (triggers model loading if it's the first time)
         cross_inp = [[query, item["snippet"]] for item in formatted]
         with redirect_stdout_to_stderr():
             cross_scores = self.cross_encoder.predict(cross_inp)
@@ -216,8 +220,5 @@ class CodeSearcher:
         for idx, score in enumerate(cross_scores):
             formatted[idx]["cross_encoder_score"] = float(score)
 
-        # Sort by cross-encoder score descending
-        formatted.sort(key=lambda x: x["cross_encoder_score"], reverse=True)
-
-        # Return top N
+        formatted.sort(key=lambda x: x.get("cross_encoder_score", 0), reverse=True)
         return formatted[:n_results]

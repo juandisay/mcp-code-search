@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic import field_validator
@@ -7,7 +8,7 @@ from pydantic_settings import BaseSettings
 _PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-class Settings(BaseSettings):
+class AppConfig(BaseSettings):
     """Application settings loaded from environment."""
 
     # ChromaDB Data Storage Directory
@@ -23,12 +24,14 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     BATCH_SIZE: int = 100
+    INDEXING_MAX_WORKERS: int = max(1, os.cpu_count() - 1)
 
     # Searcher tuning (0.0=exact, 2.0=no filter)
     MAX_DISTANCE: float = 2.0
-    INITIAL_RETRIEVAL_COUNT: int = 15
+    INITIAL_RETRIEVAL_COUNT: int = 20
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    RE_RANK_LIMIT: int = 100
+    RE_RANK_LIMIT: int = 20
+    USE_RERANKER: bool = True
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -42,4 +45,4 @@ class Settings(BaseSettings):
         return v
 
 
-config = Settings()
+config = AppConfig()
