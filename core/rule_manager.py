@@ -97,8 +97,8 @@ class RuleManager:
                 # Rule 1: check if initial-workflow lacks the REAL-TIME WATCHER update
                 if base_name == "initial-workflow.md":
                     if "REAL-TIME WATCHER" not in existing_content:
-                        # Find the mandatory index boundary to append
-                        if "## 🛠️ Mandatory Indexing" in existing_content:
+                        # Find the performance boundary to append
+                        if "## 🛠️ Performance & Memory" in existing_content:
                             new_rule = "\n- **REAL-TIME WATCHER**: There is an automatic filesystem watcher running in the background. You **DO NOT** need to re-trigger `index_folder` manually after creating or modifying code; the server incrementally indexes changes automatically."
                             # Replace old automatic re-indexing if it exists
                             if "AUTOMATIC RE-INDEXING" in existing_content:
@@ -111,7 +111,7 @@ class RuleManager:
                                         new_lines.append(line)
                                 existing_content = "\n".join(new_lines)
                             else:
-                                existing_content = existing_content.replace("## 🛠️ Mandatory Indexing", f"## 🛠️ Mandatory Indexing{new_rule}")
+                                existing_content = existing_content.replace("## 🛠️ Performance & Memory", f"## 🛠️ Performance & Memory{new_rule}")
                             
                             updated = True
                             

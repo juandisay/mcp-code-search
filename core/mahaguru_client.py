@@ -15,7 +15,7 @@ class MahaguruClient:
         """Close the internal HTTP client."""
         await self._client.aclose()
 
-    async def get_refinement(self, refinement_brief: str, system_prompt: str = None) -> str:
+    async def get_refinement(self, refinement_brief: str, code_context: str = None, system_prompt: str = None) -> str:
         """Sends a refinement brief to Mahaguru and returns the response.
         
         Tries multiple models from config.MODELS in sequence if failures occur.
@@ -26,12 +26,27 @@ class MahaguruClient:
                 "You are Mahaguru, a Senior Technical Architect and Teacher. "
                 "Your role is to refine the implementation strategy for a Worker model (Gemini Flash). "
                 "Provide clear, high-level structural guidance, best practices, and a refined plan. "
-                "Focus on robustness, scalability, and project-specific consistency."
+                "Focus on robustness, scalability, and project-specific consistency. "
+                "If 'Code Context' is provided, use it to make your suggestions concrete and actionable."
             )
 
         if not config.MAHAGURU_API_KEY:
             logger.error("MAHAGURU_API_KEY is not set in configuration.")
             return "Error: MAHAGURU_API_KEY is missing. Please set it in your .env file to enable AI Cascading."
+
+        # Pre-flight context management (Pillar III)
+        from core.token_manager import token_manager
+        
+        full_prompt = f"{system_prompt or ''}\n{refinement_brief}\n{code_context or ''}"
+        estimated_tokens = token_manager.count_tokens(full_prompt)
+        
+        # If context is too large, truncate it
+        if estimated_tokens > config.MAX_TOTAL_CONTEXT_TOKENS:
+            logger.warning("Context too large (%d tokens). Truncating...", estimated_tokens)
+            overage_ratio = config.MAX_TOTAL_CONTEXT_TOKENS / estimated_tokens
+            if code_context:
+                keep_chars = int(len(code_context) * overage_ratio * 0.9)
+                code_context = code_context[:keep_chars] + "\n... (context truncated due to token limit) ...\n"
 
         api_url = f"{config.MAHAGURU_API_URL.rstrip('/')}/chat/completions"
         api_key = config.MAHAGURU_API_KEY.get_secret_value()
@@ -45,11 +60,15 @@ class MahaguruClient:
         for model_name in config.MODELS:
             logger.info("Attempting Mahaguru refinement with model: %s", model_name)
             
+            user_content = f"Worker Refinement Brief:\n\n{refinement_brief}"
+            if code_context:
+                user_content += f"\n\n--- Code Context ---\n{code_context}\n--- End of Code Context ---"
+
             payload = {
                 "model": model_name,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Worker Refinement Brief:\n\n{refinement_brief}"}
+                    {"role": "user", "content": user_content}
                 ],
                 "temperature": 0.2,
             }

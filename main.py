@@ -14,17 +14,12 @@ from core.token_manager import token_manager
 from core.rule_manager import rule_manager
 from core.mahaguru_client import mahaguru_client
 
+from core.logger import setup_logging
+
 # When running as MCP stdio server, ALL logging MUST go to stderr.
 # Writing anything to stdout corrupts the JSON-RPC framing and causes EOF.
 _MCP_MODE = "--mcp" in sys.argv
-logging.basicConfig(
-    level=logging.INFO,
-    stream=sys.stderr,          # <-- critical: stderr only
-    format=(
-        "%(asctime)s [%(levelname)s]"
-        " %(name)s: %(message)s"
-    ),
-)
+setup_logging(level=logging.INFO, mcp_mode=_MCP_MODE)
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------- #
@@ -229,8 +224,37 @@ def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
         return f"Error syncing rules: {e}"
 
 
+def is_path_safe(file_path: str) -> bool:
+    """Check if the file path is within allowed context roots (Pillar III)."""
+    try:
+        abs_path = os.path.abspath(file_path)
+        return any(abs_path.startswith(os.path.abspath(root)) for root in config.ALLOWED_CONTEXT_ROOTS)
+    except Exception:
+        return False
+
+def read_file_chunked(file_path: str, max_bytes: int = 102400) -> str:
+    """Read file content in chunks with a hard limit to prevent memory exhaustion."""
+    content = ""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            while len(content) < max_bytes:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                content += chunk
+            if len(content) >= max_bytes:
+                content += "\n... (truncated due to size limit) ...\n"
+        return content
+    except UnicodeDecodeError:
+        return "[Error: Unable to decode file as UTF-8 text (possibly binary)]"
+    except Exception as e:
+        return f"[Error reading file: {str(e)}]"
+
 @mcp.tool()
-async def request_mahaguru_refinement(refinement_brief: str) -> str:
+async def request_mahaguru_refinement(
+    refinement_brief: str,
+    relevant_files: list[str] = None
+) -> str:
     """Escalate a task to the Mahaguru (Teacher/Planner) model for refinement.
 
     Use this when:
@@ -240,9 +264,31 @@ async def request_mahaguru_refinement(refinement_brief: str) -> str:
 
     Args:
         refinement_brief: A clear summary of the problem, what's been tried, and the roadblock.
+        relevant_files: List of absolute file paths to include as context.
     """
-    logger.info("Mahaguru refinement requested...")
-    response = await mahaguru_client.get_refinement(refinement_brief)
+    files_count = len(relevant_files) if relevant_files else 0
+    logger.info("Mahaguru refinement requested with %d files...", files_count)
+    
+    code_context = ""
+    if relevant_files:
+        context_parts = []
+        for file_path in relevant_files:
+            # 1. Sandboxing (Security)
+            if not is_path_safe(file_path):
+                logger.warning("Blocked access to unsafe file path: %s", file_path)
+                context_parts.append(f"### File: {file_path}\n[Access Denied: Path outside allowed context roots]")
+                continue
+
+            # 2. Existence Check & Chunked Reading (Performance)
+            if os.path.isfile(file_path):
+                content = read_file_chunked(file_path, max_bytes=config.MAX_CONTEXT_FILE_SIZE)
+                context_parts.append(f"### File: {file_path}\n```\n{content}\n```")
+            else:
+                context_parts.append(f"### File: {file_path}\n[Error: File not found]")
+        
+        code_context = "\n\n".join(context_parts)
+
+    response = await mahaguru_client.get_refinement(refinement_brief, code_context=code_context)
     
     output = (
         "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
@@ -340,6 +386,12 @@ async def api_index_folder(
         "message": "Indexing started in background",
         "folder_path": req.folder_path,
     }
+
+
+@app.get("/health")
+async def api_health():
+    """Liveliness check (Pillar II)."""
+    return {"status": "ok", "version": "1.0.0"}
 
 
 @app.get("/stats")

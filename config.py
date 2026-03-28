@@ -45,6 +45,12 @@ class AppConfig(BaseSettings):
     RE_RANK_LIMIT: int = 20
     USE_RERANKER: bool = True
 
+    # Hardening & Security (Pillar III)
+    PROJECT_ROOT: Path = _PROJECT_ROOT
+    MAX_CONTEXT_FILE_SIZE: int = 100 * 1024  # 100KB per file
+    MAX_TOTAL_CONTEXT_TOKENS: int = 30000    # Safeguard for Mahaguru context
+    ALLOWED_CONTEXT_ROOTS: list[str] = [str(_PROJECT_ROOT)]
+
     model_config = {
         "env_file": str(_PROJECT_ROOT / ".env"),
         "extra": "ignore"

@@ -25,7 +25,8 @@ This project uses a dual-model cascading architecture to ensure high-quality exe
    - What is the problem?
    - What has been tried?
    - Why did it fail? (Error logs/results)
-3. **Escalate**: Call `request_mahaguru_refinement(refinement_brief)`.
+   - **Supporting Code**: Include absolute paths to relevant files in the `relevant_files` argument for deeper analysis.
+3. **Escalate**: Call `request_mahaguru_refinement(refinement_brief, relevant_files=...)`.
 4. **Execution**: The Worker implements the refined plan provided by Mahaguru.
 
 ## 📝 Planning Requirements
