@@ -24,3 +24,5 @@ tree-sitter-cpp
 tree-sitter-c-sharp
 tree-sitter-html
 tree-sitter-css
+httpx
+pytest-asyncio

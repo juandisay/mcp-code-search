@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, SecretStr
 from pydantic_settings import BaseSettings
 
 # Project root directory (where this file lives)
@@ -20,6 +20,18 @@ class AppConfig(BaseSettings):
     # Optional: Automatically index this folder on startup
     PROJECT_FOLDER_TO_INDEX: str = ""
 
+    # AI Cascading (Mahaguru Model)
+    MAHAGURU_API_URL: str = "http://127.0.0.1:8317/v1"
+    MAHAGURU_API_KEY: SecretStr | None = None
+    MODELS: list[str] = [
+        "gemini-2.5-pro",
+        "coder-model",
+        "claude-opus-4-6-thinking",
+        "claude-haiku-4.5",
+        "gpt-5.3-codex",
+        "deepseek-r1"
+    ]
+
     # Indexer tuning
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
@@ -33,7 +45,10 @@ class AppConfig(BaseSettings):
     RE_RANK_LIMIT: int = 20
     USE_RERANKER: bool = True
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_file": str(_PROJECT_ROOT / ".env"),
+        "extra": "ignore"
+    }
 
     @field_validator("CHROMA_DATA_PATH", "CHUNKS_STORAGE_PATH")
     @classmethod

@@ -115,6 +115,27 @@ class RuleManager:
                             
                             updated = True
                             
+                    # Marker-based sync for AI Cascading
+                    MARKER_START = "<!-- MAHAGURU_AI_CASCADING_START -->"
+                    MARKER_END = "<!-- MAHAGURU_AI_CASCADING_END -->"
+                    
+                    if MARKER_START in template_content and MARKER_END in template_content:
+                        import re
+                        pattern = f"{re.escape(MARKER_START)}.*?{re.escape(MARKER_END)}"
+                        template_match = re.search(pattern, template_content, re.DOTALL)
+                        
+                        if template_match:
+                            new_section = template_match.group(0)
+                            
+                            if MARKER_START in existing_content and MARKER_END in existing_content:
+                                # Replace existing section
+                                existing_content = re.sub(pattern, new_section, existing_content, flags=re.DOTALL)
+                                updated = True
+                            else:
+                                # Append new section
+                                existing_content = existing_content.strip() + f"\n\n{new_section}\n"
+                                updated = True
+                            
                 # Rule 2: Re-inject stack if it was completely lost or if requested
                 if base_name == "stack.md":
                     placeholder = "> [!IMPORTANT]\n> This is a template"
@@ -122,6 +143,12 @@ class RuleManager:
                         replacement = f"> [!IMPORTANT]\n> Detected Stack: **{detected_stack}**\n>\n> This file was automatically customized for this workspace during sync."
                         existing_content = existing_content.replace(placeholder, replacement)
                         updated = True
+
+                # Rule 3: Ensure AI Cascading protocol is updated with latest roles
+                if base_name == "ai-cascading.md":
+                    if "Worker Model" in existing_content and "Mahaguru Model" in existing_content:
+                        # We could add more specific merge logic here if needed
+                        pass
 
                 if updated:
                     with open(target_file, "w", encoding="utf-8") as f:

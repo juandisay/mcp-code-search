@@ -23,3 +23,12 @@
 ## 📝 Documentation & Planning
 - Every task MUST start with a concise implementation plan.
 - Every piece of logic MUST be accompanied by documentation.
+
+
+<!-- MAHAGURU_AI_CASCADING_START -->
+## 🛸 AI Cascading & Planning (MANDATORY)
+- **Mahaguru Planning First**: Every complex task (logic/architectural) MUST start with a Mahaguru-approved plan.
+- **Worker Execution**: The Worker (Flash) executes based on the Mahaguru's plan.
+- **3-Strike Rule**: If the Worker fails 3 times, call `request_mahaguru_refinement` for a micro-response.
+- **Micro-Suggestions**: The Worker may suggest completions or optimizations during the planning phase.
+<!-- MAHAGURU_AI_CASCADING_END -->

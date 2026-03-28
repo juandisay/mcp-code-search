@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from config import config
 from core.token_manager import token_manager
 from core.rule_manager import rule_manager
+from core.mahaguru_client import mahaguru_client
 
 # When running as MCP stdio server, ALL logging MUST go to stderr.
 # Writing anything to stdout corrupts the JSON-RPC framing and causes EOF.
@@ -226,6 +227,31 @@ def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
         )
     except Exception as e:
         return f"Error syncing rules: {e}"
+
+
+@mcp.tool()
+async def request_mahaguru_refinement(refinement_brief: str) -> str:
+    """Escalate a task to the Mahaguru (Teacher/Planner) model for refinement.
+
+    Use this when:
+    - You've hit the 3-strike rule on a bug.
+    - The task requires high-level architectural planning.
+    - You need guidance on project-specific patterns.
+
+    Args:
+        refinement_brief: A clear summary of the problem, what's been tried, and the roadblock.
+    """
+    logger.info("Mahaguru refinement requested...")
+    response = await mahaguru_client.get_refinement(refinement_brief)
+    
+    output = (
+        "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
+        f"{response}\n\n"
+        "--- END OF REFINEMENT ---"
+    )
+    
+    total_tokens = token_manager.count_tokens(output)
+    return output + token_manager.format_usage_summary(total_tokens)
 
 
 # --------------------------------------------------------- #
