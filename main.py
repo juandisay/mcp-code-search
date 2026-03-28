@@ -1,21 +1,20 @@
 """Entry point — FastAPI management + MCP server."""
+import asyncio
+import logging
 import os
 import sys
-import logging
-import asyncio
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
 
 from config import config
-from core.token_manager import token_manager
-from core.rule_manager import rule_manager
-from core.mahaguru_client import mahaguru_client
-
 from core.logger import setup_logging
+from core.mahaguru_client import mahaguru_client
+from core.rule_manager import rule_manager
+from core.token_manager import token_manager
 
 # When running as MCP stdio server, ALL logging MUST go to stderr.
 # Writing anything to stdout corrupts the JSON-RPC framing and causes EOF.
@@ -76,37 +75,6 @@ def get_watcher():
 # --------------------------------------------------------- #
 mcp = FastMCP("CodeMemoryMCP")
 
-
-@mcp.tool()
-def semantic_code_search(
-    query: str,
-    n_results: int = 3,
-    project_name: str = None,
-    max_distance: float = None,
-    language: list[str] = None,
-    file_path_includes: str = None,
-    excluded_dirs: list[str] = None,
-    re_rank: bool = None,
-) -> str:
-    """Search for code snippets via NLP query.
-
-    Args:
-        query: What to find, e.g. 'S3 upload'.
-        n_results: Number of results.
-        project_name: Filter by project.
-        max_distance: Relevance threshold.
-        language: Filter by file extension(s) (e.g. ['.py', '.ts']).
-        file_path_includes: Require a specific substring in file path.
-        excluded_dirs: Exclude dirs from search (e.g. ['node_modules']).
-        re_rank: Whether to use cross-encoder reranking.
-    """
-    results = get_searcher().search(
-        query, n_results, project_name, max_distance,
-        language=language, file_path_includes=file_path_includes,
-        excluded_dirs=excluded_dirs, re_rank=re_rank
-    )
-    if not results:
-        return "No relevant code snippets found."
 
 def _format_search_results(results: list) -> str:
     """Helper to format search results into a clean string."""
@@ -315,13 +283,13 @@ async def request_mahaguru_refinement(
     """
     files_count = len(relevant_files) if relevant_files else 0
     logger.info("Mahaguru refinement requested with %d files...", files_count)
-    
+
     # 1. Automatic RAG Context (semantic search)
     rag_context = ""
     try:
         searcher = get_searcher()
         search_results = searcher.search(
-            query=refinement_brief, 
+            query=refinement_brief,
             n_results=config.MAHAGURU_AUTO_CONTEXT_COUNT
         )
         if search_results:
@@ -350,18 +318,18 @@ async def request_mahaguru_refinement(
                 context_parts.append(f"### File: {file_path}\n```\n{content}\n```")
             else:
                 context_parts.append(f"### File: {file_path}\n[Error: File not found]")
-        
+
         file_context = "\n\n".join(context_parts)
 
     # 3. Combine Context with Token Budgeting
     full_context = ""
     total_tokens = 0
-    
+
     # Prioritize RAG context if small, then files
     if rag_context:
         full_context += rag_context + "\n\n"
         total_tokens += token_manager.count_tokens(rag_context)
-        
+
     if file_context:
         file_tokens = token_manager.count_tokens(file_context)
         if total_tokens + file_tokens > config.MAX_TOTAL_CONTEXT_TOKENS:
@@ -372,13 +340,13 @@ async def request_mahaguru_refinement(
             full_context += file_context
 
     response = await mahaguru_client.get_refinement(refinement_brief, code_context=full_context)
-    
+
     output = (
         "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
         f"{response}\n\n"
         "--- END OF REFINEMENT ---"
     )
-    
+
     total_tokens = token_manager.count_tokens(output)
     return output + token_manager.format_usage_summary(total_tokens)
 
@@ -419,7 +387,7 @@ async def lifespan(app: FastAPI):
     """Manage service lifecycles (Pillar III)."""
     # 1. Initialize Indexer (starts consumer thread & writer conn)
     indexer = get_indexer()
-    
+
     # 2. Auto-index on startup if configured (PRD §6.2)
     if config.PROJECT_FOLDER_TO_INDEX:
         loop = asyncio.get_event_loop()
@@ -428,14 +396,14 @@ async def lifespan(app: FastAPI):
             _run_background_indexing,
             config.PROJECT_FOLDER_TO_INDEX,
         )
-    
+
     yield
-    
+
     # 3. Graceful Shutdown
     logger.info("Lifespan: Shutting down services...")
     if _watcher:
         _watcher.stop()
-    
+
     if _indexer:
         _indexer.shutdown()
 
@@ -509,7 +477,7 @@ async def api_delete_project(project_name: str):
         summary = get_indexer().delete_project(project_name)
         return {"message": "Project deleted", "summary": summary}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/sync-rules")
@@ -525,7 +493,7 @@ async def api_sync_rules(req: SyncRequest):
         overview = rule_manager.sync_rules(req.folder_path, req.context_notes)
         return {"message": "Rules synced", "overview": overview}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --------------------------------------------------------- #

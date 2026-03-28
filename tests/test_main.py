@@ -1,4 +1,5 @@
 """Tests for MCP tools defined in main.py."""
+import pytest
 from main import (
     semantic_code_search,
     index_folder,
@@ -51,3 +52,40 @@ class TestGetIndexStats:
         result = get_index_stats()
         assert "Total indexed chunks" in result
         assert "Collection" in result
+
+
+class TestMCPIntegration:
+    """Tests for MCP tool registration and integration."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_semantic_search_tool_is_correctly_registered(self):
+        """
+        Verify that the registered MCP tool returns a string and not None.
+        This tests the integration between the function and the FastMCP framework.
+        """
+        from main import mcp
+        from unittest.mock import patch, MagicMock
+
+        # 1. Mock the backend searcher to simulate findings
+        mock_searcher = MagicMock()
+        # Return a sample result to trigger the return path
+        mock_searcher.search.return_value = [{
+            "snippet": "test code",
+            "file_path": "test.py",
+            "start_line": 1,
+            "project_name": "test_proj",
+            "distance": 0.1
+        }]
+
+        # 2. Use a patch to inject the mock
+        with patch('main.get_searcher', return_value=mock_searcher):
+            # 3. Call the tool via mcp.call_tool (the official way to invoke it)
+            # FastMCP returns a tuple: (list_of_content_objects, extra_metadata_dict)
+            content_list, _ = await mcp.call_tool("semantic_code_search", arguments={"query": "test query"})
+            
+            # 4. Assert it returns a string with token usage
+            assert len(content_list) > 0
+            result = content_list[0].text
+            assert isinstance(result, str)
+            assert "--- Snippet 1" in result
+            assert "token usage:" in result
