@@ -6,6 +6,7 @@
 - **Noise Filtering**: Ignore `node_modules`, `.git`, `dist`, `build` during any interaction.
 
 ## 🛠️ Performance & Memory
+- **REAL-TIME WATCHER**: There is an automatic filesystem watcher running in the background. You **DO NOT** need to re-trigger `index_folder` manually after creating or modifying code; the server incrementally indexes changes automatically.
 - **Mandatory Indexing**: Call `mcp_code-memory_index_folder` at the very start of every new session to ensure the "Brain" is up-to-date.
 - **Post-Action Indexing**: Always re-index the project after creating or modifying code files to maintain sync.
 - **Brain Mode**: Treat `code-memory` as the primary source of truth for project structure and logic. Avoid manual directory exploration unless semantic search fails.

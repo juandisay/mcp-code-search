@@ -5,9 +5,9 @@ from core.indexer import CodeIndexer
 from core.searcher import CodeSearcher
 
 
-def test_core_engine():
+def test_core_engine(app_config):
     """Integration: index core/ and search for code."""
-    indexer = CodeIndexer()
+    indexer = CodeIndexer(app_config=app_config)
 
     folder_to_index = os.path.abspath(
         os.path.join(
@@ -21,7 +21,7 @@ def test_core_engine():
     count = indexer.collection.count()
     assert count > 0, "No documents were indexed."
 
-    searcher = CodeSearcher()
+    searcher = CodeSearcher(app_config=app_config)
     results = searcher.search(
         "ChromaDB client", n_results=2
     )

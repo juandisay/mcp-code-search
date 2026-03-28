@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -23,34 +24,50 @@ setup_logging(level=logging.INFO, mcp_mode=_MCP_MODE)
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------- #
-#  Core Services (Lazy-initialized)                         #
+#  Core Services (Lazy-initialized & Thread-safe Singleton)  #
 # --------------------------------------------------------- #
 _indexer = None
 _searcher = None
 _watcher = None
 
+_indexer_lock = threading.Lock()
+_searcher_lock = threading.Lock()
+_watcher_lock = threading.Lock()
+
 
 def get_indexer():
+    """Retrieve or initialize the CodeIndexer singleton (Thread-Safe)."""
     global _indexer
     if _indexer is None:
-        from core.indexer import CodeIndexer
-        _indexer = CodeIndexer()
+        with _indexer_lock:
+            if _indexer is None:
+                from core.indexer import CodeIndexer
+                logger.info("Initializing CodeIndexer singleton...")
+                _indexer = CodeIndexer(app_config=config)
     return _indexer
 
 
 def get_searcher():
+    """Retrieve or initialize the CodeSearcher singleton (Thread-Safe)."""
     global _searcher
     if _searcher is None:
-        from core.searcher import CodeSearcher
-        _searcher = CodeSearcher()
+        with _searcher_lock:
+            if _searcher is None:
+                from core.searcher import CodeSearcher
+                logger.info("Initializing CodeSearcher singleton...")
+                _searcher = CodeSearcher(app_config=config)
     return _searcher
 
 
 def get_watcher():
+    """Retrieve or initialize the ProjectWatcher singleton (Thread-Safe)."""
     global _watcher
     if _watcher is None:
-        from core.watcher import ProjectWatcher
-        _watcher = ProjectWatcher(get_indexer())
+        with _watcher_lock:
+            if _watcher is None:
+                from core.watcher import ProjectWatcher
+                logger.info("Initializing ProjectWatcher singleton...")
+                _watcher = ProjectWatcher(get_indexer())
     return _watcher
 
 
@@ -91,24 +108,54 @@ def semantic_code_search(
     if not results:
         return "No relevant code snippets found."
 
+def _format_search_results(results: list) -> str:
+    """Helper to format search results into a clean string."""
+    if not results:
+        return "No relevant code snippets found."
+
     lines = []
     for i, res in enumerate(results):
         dist = res.get("distance")
-        dist_info = (
-            f" (distance: {dist:.4f})"
-            if dist is not None
-            else ""
-        )
+        dist_info = f" (distance: {dist:.4f})" if dist is not None else ""
         proj = res.get("project_name", "Unknown")
         lines.append(
-            f"--- Result {i + 1}{dist_info} ---\n"
-            f"File: {res['file_path']}"
-            f" (Line {res['start_line']})\n"
+            f"--- Snippet {i + 1}{dist_info} ---\n"
+            f"File: {res['file_path']} (Line {res['start_line']})\n"
             f"Project: {proj}\n"
             f"Code:\n{res['snippet']}\n"
         )
+    return "\n".join(lines)
 
-    output = "\n".join(lines)
+
+@mcp.tool()
+def semantic_code_search(
+    query: str,
+    n_results: int = 3,
+    project_name: str = None,
+    max_distance: float = None,
+    language: list[str] = None,
+    file_path_includes: str = None,
+    excluded_dirs: list[str] = None,
+    re_rank: bool = None,
+) -> str:
+    """Search for code snippets via NLP query.
+
+    Args:
+        query: What to find, e.g. 'S3 upload'.
+        n_results: Number of results.
+        project_name: Filter by project.
+        max_distance: Relevance threshold.
+        language: Filter by file extension(s) (e.g. ['.py', '.ts']).
+        file_path_includes: Require a specific substring in file path.
+        excluded_dirs: Exclude dirs from search (e.g. ['node_modules']).
+        re_rank: Whether to use cross-encoder reranking.
+    """
+    results = get_searcher().search(
+        query, n_results, project_name, max_distance,
+        language=language, file_path_includes=file_path_includes,
+        excluded_dirs=excluded_dirs, re_rank=re_rank
+    )
+    output = _format_search_results(results)
     total_tokens = token_manager.count_tokens(output)
     return output + token_manager.format_usage_summary(total_tokens)
 
@@ -269,26 +316,62 @@ async def request_mahaguru_refinement(
     files_count = len(relevant_files) if relevant_files else 0
     logger.info("Mahaguru refinement requested with %d files...", files_count)
     
-    code_context = ""
+    # 1. Automatic RAG Context (semantic search)
+    rag_context = ""
+    try:
+        searcher = get_searcher()
+        search_results = searcher.search(
+            query=refinement_brief, 
+            n_results=config.MAHAGURU_AUTO_CONTEXT_COUNT
+        )
+        if search_results:
+            rag_context = (
+                "### AUTO-RETRIEVED CONTEXT FROM INDEXER\n"
+                "The following snippets were found based on semantic relevance to your request:\n\n"
+                + _format_search_results(search_results)
+            )
+    except Exception as e:
+        logger.warning("Failed to auto-retrieve RAG context for Mahaguru: %s", e)
+
+    # 2. File Context (explicitly requested files)
+    file_context = ""
     if relevant_files:
         context_parts = []
         for file_path in relevant_files:
-            # 1. Sandboxing (Security)
+            # Sandboxing (Security)
             if not is_path_safe(file_path):
                 logger.warning("Blocked access to unsafe file path: %s", file_path)
                 context_parts.append(f"### File: {file_path}\n[Access Denied: Path outside allowed context roots]")
                 continue
 
-            # 2. Existence Check & Chunked Reading (Performance)
+            # Existence Check & Chunked Reading (Performance)
             if os.path.isfile(file_path):
                 content = read_file_chunked(file_path, max_bytes=config.MAX_CONTEXT_FILE_SIZE)
                 context_parts.append(f"### File: {file_path}\n```\n{content}\n```")
             else:
                 context_parts.append(f"### File: {file_path}\n[Error: File not found]")
         
-        code_context = "\n\n".join(context_parts)
+        file_context = "\n\n".join(context_parts)
 
-    response = await mahaguru_client.get_refinement(refinement_brief, code_context=code_context)
+    # 3. Combine Context with Token Budgeting
+    full_context = ""
+    total_tokens = 0
+    
+    # Prioritize RAG context if small, then files
+    if rag_context:
+        full_context += rag_context + "\n\n"
+        total_tokens += token_manager.count_tokens(rag_context)
+        
+    if file_context:
+        file_tokens = token_manager.count_tokens(file_context)
+        if total_tokens + file_tokens > config.MAX_TOTAL_CONTEXT_TOKENS:
+            logger.warning("Context exceeds token limit. Truncating file context.")
+            # Simple truncation for now, could be smarter
+            full_context += "### (Truncated File Context)\n"
+        else:
+            full_context += file_context
+
+    response = await mahaguru_client.get_refinement(refinement_brief, code_context=full_context)
     
     output = (
         "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
@@ -333,7 +416,11 @@ def _run_background_indexing(folder_path: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Auto-index on startup (PRD §6.2)."""
+    """Manage service lifecycles (Pillar III)."""
+    # 1. Initialize Indexer (starts consumer thread & writer conn)
+    indexer = get_indexer()
+    
+    # 2. Auto-index on startup if configured (PRD §6.2)
     if config.PROJECT_FOLDER_TO_INDEX:
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
@@ -341,9 +428,16 @@ async def lifespan(app: FastAPI):
             _run_background_indexing,
             config.PROJECT_FOLDER_TO_INDEX,
         )
+    
     yield
+    
+    # 3. Graceful Shutdown
+    logger.info("Lifespan: Shutting down services...")
     if _watcher:
         _watcher.stop()
+    
+    if _indexer:
+        _indexer.shutdown()
 
 
 app = FastAPI(

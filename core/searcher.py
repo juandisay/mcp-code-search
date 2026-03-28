@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional, Union
 import chromadb
 from chromadb.utils import embedding_functions
 from sentence_transformers import CrossEncoder
-from config import config
+
+from core.db_utils import get_collection_name # Add this
 
 logger = logging.getLogger(__name__)
 
@@ -38,35 +39,46 @@ class CodeSearcher:
     """Query ChromaDB for code snippets."""
 
     def __init__(
-        self, max_distance: float = config.MAX_DISTANCE
+        self,
+        app_config: Any,
+        embedding_fn: Any = None,
     ):
         """Initialise the searcher.
 
         Args:
-            max_distance: Default cosine distance cap.
+            app_config: Application configuration instance.
+            embedding_fn: Optional custom embedding function.
         """
+        self.config = app_config
         self.chroma_client = chromadb.PersistentClient(
-            path=config.CHROMA_DATA_PATH
+            path=self.config.CHROMA_DATA_PATH
         )
+        
+        # Dependency Injection for Embedding Function
         self.embedding_fn = (
-            embedding_functions.DefaultEmbeddingFunction()
+            embedding_fn or embedding_functions.DefaultEmbeddingFunction()
         )
+        
+        # Unified Collection Naming
+        coll_name = get_collection_name(self.embedding_fn)
+        
         self.collection = (
             self.chroma_client.get_or_create_collection(
-                name="code_snippets",
+                name=coll_name,
                 embedding_function=self.embedding_fn,
             )
         )
-        self.max_distance = max_distance
+        
+        self.max_distance = self.config.MAX_DISTANCE
         self._cross_encoder = None
 
     @property
     def cross_encoder(self):
         """Lazy-load the Cross-Encoder model only when needed."""
         if self._cross_encoder is None:
-            logger.info("Loading CrossEncoder model: %s on device: %s", config.CROSS_ENCODER_MODEL, _DEVICE)
+            logger.info("Loading CrossEncoder model: %s on device: %s", self.config.CROSS_ENCODER_MODEL, _DEVICE)
             with redirect_stdout_to_stderr():
-                self._cross_encoder = CrossEncoder(config.CROSS_ENCODER_MODEL, device=_DEVICE)
+                self._cross_encoder = CrossEncoder(self.config.CROSS_ENCODER_MODEL, device=_DEVICE)
         return self._cross_encoder
 
     def search(
@@ -98,11 +110,11 @@ class CodeSearcher:
         if collection_count == 0:
             return []
             
-        should_re_rank = re_rank if re_rank is not None else config.USE_RERANKER
+        should_re_rank = re_rank if re_rank is not None else self.config.USE_RERANKER
         
         # Stage 1: Fetch larger candidate pool if re-ranking, or exactly n_results if not
         if should_re_rank:
-            initial_k = max(n_results, config.RE_RANK_LIMIT)
+            initial_k = max(n_results, self.config.RE_RANK_LIMIT)
         else:
             initial_k = n_results
         
@@ -114,16 +126,18 @@ class CodeSearcher:
 
         initial_k = max(1, initial_k)
 
-        # Build native where clause
+        # Build native where clause (Pillar II: push as much as possible to DB)
         where_conditions = []
         
         if project_name:
             if isinstance(project_name, list):
-                where_conditions.append({"project_name": {"$in": project_name}})
+                if len(project_name) == 1:
+                    where_conditions.append({"project_name": project_name[0]})
+                else:
+                    where_conditions.append({"project_name": {"$in": project_name}})
             else:
                 where_conditions.append({"project_name": project_name})
         
-        # Native language filtering (requires 'extension' field in metadata)
         if language:
             langs = language if isinstance(language, list) else [language]
             langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
@@ -132,6 +146,10 @@ class CodeSearcher:
             else:
                 where_conditions.append({"extension": {"$in": langs}})
 
+        # file_path_includes as native filter (experimental but recommended by Mahaguru)
+        # We try to use $contains or $like if supported, else we fall back to Python filtering
+        # Since we can't easily detect support without trial, we keep Python filter as safeguard.
+        
         where_clause = None
         if len(where_conditions) == 1:
             where_clause = where_conditions[0]

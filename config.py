@@ -24,7 +24,10 @@ class AppConfig(BaseSettings):
     MAHAGURU_API_URL: str = "http://127.0.0.1:8317/v1"
     MAHAGURU_API_KEY: SecretStr | None = None
     MODELS: list[str] = [
+        "gemini-3-pro-high",
         "gemini-2.5-pro",
+        "gemini-3.1-pro-high",
+        "gemini-3.1-pro-low",
         "coder-model",
         "claude-opus-4-6-thinking",
         "claude-haiku-4.5",
@@ -37,6 +40,7 @@ class AppConfig(BaseSettings):
     CHUNK_OVERLAP: int = 200
     BATCH_SIZE: int = 100
     INDEXING_MAX_WORKERS: int = max(1, os.cpu_count() - 1)
+    STATE_DB_NAME: str = "indexer_state.sqlite"
 
     # Searcher tuning (0.0=exact, 2.0=no filter)
     MAX_DISTANCE: float = 2.0
@@ -44,6 +48,11 @@ class AppConfig(BaseSettings):
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RE_RANK_LIMIT: int = 20
     USE_RERANKER: bool = True
+
+    # Mahaguru RAG Tuning
+    MAHAGURU_AUTO_CONTEXT_COUNT: int = 5
+    MAHAGURU_API_TIMEOUT: int = 30
+    MAHAGURU_API_RETRIES: int = 2
 
     # Hardening & Security (Pillar III)
     PROJECT_ROOT: Path = _PROJECT_ROOT

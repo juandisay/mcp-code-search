@@ -6,9 +6,13 @@ from core.searcher import CodeSearcher
 
 
 @pytest.fixture(scope="module")
-def indexed_searcher(tmp_path_factory):
+def indexed_searcher(tmp_path_factory, app_config):
     """Index sample files and return a ready searcher."""
     tmp = tmp_path_factory.mktemp("search_project")
+    
+    # Isolation: Use a temporary ChromaDB path for this test module
+    app_config.CHROMA_DATA_PATH = str(tmp_path_factory.mktemp("chroma_db_searcher"))
+    
     (tmp / "math_utils.py").write_text(
         "def add(a, b):\n"
         "    return a + b\n\n"
@@ -31,17 +35,18 @@ def indexed_searcher(tmp_path_factory):
         "    return a + b + 1\n"
     )
     
-    indexer = CodeIndexer()
+    # Use DI for both Indexer and Searcher
+    indexer = CodeIndexer(app_config=app_config)
     indexer.index_project_folder(str(tmp))
-    return CodeSearcher()
+    return CodeSearcher(app_config=app_config)
 
 
 class TestCodeSearcher:
     """Tests for the CodeSearcher class."""
 
-    def test_init_defaults(self):
-        """Searcher initialises with default max_distance."""
-        s = CodeSearcher()
+    def test_init_defaults(self, app_config):
+        """Searcher initialises with default values."""
+        s = CodeSearcher(app_config=app_config)
         assert s.max_distance == 2.0
         assert s.collection is not None
 
@@ -62,9 +67,9 @@ class TestCodeSearcher:
             assert "distance" in r
             assert "cross_encoder_score" in r
 
-    def test_search_empty_collection(self):
+    def test_search_empty_collection(self, app_config):
         """Searching an empty collection returns []."""
-        s = CodeSearcher()
+        s = CodeSearcher(app_config=app_config)
         # Use a very specific query on a fresh instance
         results = s.search(
             "nonexistent_xyzzy_query_12345",

@@ -1,17 +1,21 @@
-# Code-Memory MCP Plan
+# Code-Memory MCP Plan - (COMPLETED)
 
-This directory contains the breakdown of the implementation plan for the Code-Memory MCP server.
-It is divided into 4 sequential phases:
+This directory contains the historical breakdown of the initial implementation plan. 
+All phases are now complete as of **March 28, 2026**.
 
-1. [Phase 1: Setup & Configuration](01_setup_and_config.md)
-   - Defines dependencies (`requirements.txt`)
-   - Establish `.env` and `config.py` for variables like `PROJECT_FOLDER_TO_INDEX` (to auto-index on startup).
-2. [Phase 2: Core Engine](02_core_engine.md)
-   - Implement `core/indexer.py` (chunking, smart file splitting).
-   - Implement `core/searcher.py` (ChromaDB query logic).
-3. [Phase 3: APIs and MCP Integration](03_api_and_mcp.md)
-   - `main.py` FastAPI app.
-   - MCP endpoints and tools (`semantic_code_search`, `index_folder`).
-   - Server lifecycle auto-index process.
-4. [Phase 4: Testing & Verification](04_testing_and_verification.md)
-   - Manual tests using dummy data and `mcp dev`.
+## Final Documentation Suite
+
+For up-to-date documentation on the stable release, please see the root [README](../../README.md) and the following guides:
+
+- 📑 **[Architecture & Concepts](../architecture.md)**
+- 🛠️ **[MCP Tools Reference](../mcp_tools.md)**
+- 🔌 **[API Reference](../api_reference.md)**
+- 🚀 **[User Guide & Setup](../user_guide.md)**
+- 📝 **[Product Requirements Document (PRD)](../prd.md)**
+
+## Initial Phase History
+
+1. **[Phase 1: Setup & Configuration](01_setup_and_config.md)** - (Done)
+2. **[Phase 2: Core Engine](02_core_engine.md)** - (Done)
+3. **[Phase 3: APIs and MCP Integration](03_api_and_mcp.md)** - (Done)
+4. **[Phase 4: Testing & Verification](04_testing_and_verification.md)** - (Done)
