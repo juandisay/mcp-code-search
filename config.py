@@ -24,8 +24,6 @@ class AppConfig(BaseSettings):
     MAHAGURU_API_URL: str = "http://127.0.0.1:8317/v1"
     MAHAGURU_API_KEY: SecretStr | None = None
     MODELS: list[str] = [
-        "gemini-3-pro-high",
-        "gemini-2.5-pro",
         "gemini-3.1-pro-high",
         "gemini-3.1-pro-low",
         "coder-model",
