@@ -207,14 +207,7 @@ class CodeSearcher:
         # Load snippets in parallel
         def _load_snippet(candidate: dict) -> dict:
             meta = candidate["meta"]
-            doc = candidate["doc"]
-            snippet = doc
-            if not snippet and meta and meta.get("chunk_file"):
-                try:
-                    with open(meta["chunk_file"], "r", encoding="utf-8") as f:
-                        snippet = f.read()
-                except Exception:
-                    snippet = "[Content could not be loaded]"
+            snippet = candidate["doc"] or ""
             return {
                 "snippet": snippet,
                 "file_path": meta.get("file_path", ""),

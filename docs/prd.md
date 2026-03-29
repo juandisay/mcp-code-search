@@ -3,8 +3,8 @@
 ## **1. Identitas Proyek**
 
 - **Nama Proyek:** Code-Memory MCP
-- **Versi:** 1.0.0
-- **Status:** Stable / Production-Ready
+- **Versi:** 1.1.0 (Development)
+- **Status:** Active Development / Beta
 - **Teknologi Utama:** Python, FastAPI, ChromaDB, MCP SDK, Sentence-Transformers, Tree-Sitter (AST), Cross-Encoders.
 
 ---
@@ -52,8 +52,27 @@ Menyediakan interface agar LLM (seperti Claude Desktop atau Antigravity) dapat m
 
 - `semantic_code_search`: Pencarian semantik dengan filter metadata dan ranking tingkat lanjut.
 - `index_folder`: Memindai folder baru ke dalam database.
-- `request_mahaguru_refinement`: Eskalasi tugas ke model AI tingkat tinggi dengan konteks RAG otomatis.
+- `request_mahaguru_refinement`: Eskalasi tugas ke model AI tingkat tinggi dengan konteks RAG otomatis (Blocking).
+- `request_async_mahaguru_refinement`: Eskalasi tugas asinkron yang memungkinkan kerja paralel (Non-Blocking).
+- `get_planning_job_result`: Mengambil hasil dari tugas perencanaan asinkron.
 - `sync_agent_rules`: Sinkronisasi aturan agen (.agents/rules) berdasarkan stack teknologi proyek.
+
+---
+
+## **Roadmap v1.1.0**
+
+### **1. Hybrid Search (Precision Upgrade)**
+- Integrasi **BM25 / Keyword Search** berdampingan dengan Vector Search.
+- Menggunakan **SQLite FTS5** untuk pencarian kata kunci yang cepat.
+- Rank Fusion untuk menggabungkan skor semantik dan leksikal.
+
+### **2. Automated Maintenance (Garbage Collection)**
+- Deteksi otomatis file yang dihapus melalui `maintenance/prune`.
+- Sinkronisasi *idempotent* antara state database dan sistem file.
+
+### **3. Enhanced AST Context**
+- Penambahan elemen `imports` dan `class hierarchy` ke dalam metadata chunk.
+- Peningkatan akurasi pengambilan untuk kode yang memiliki ketergantungan (dependencies) tinggi.
 
 ---
 

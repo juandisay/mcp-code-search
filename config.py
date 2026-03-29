@@ -51,7 +51,7 @@ class AppConfig(BaseSettings):
 
     # Mahaguru RAG Tuning
     MAHAGURU_AUTO_CONTEXT_COUNT: int = 5
-    MAHAGURU_API_TIMEOUT: int = 30
+    MAHAGURU_API_TIMEOUT: int = 180
     MAHAGURU_API_RETRIES: int = 2
 
     # Hardening & Security (Pillar III)

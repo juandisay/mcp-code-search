@@ -30,6 +30,11 @@ class TestConfig:
         s = AppConfig()
         assert s.MAX_DISTANCE == 2.0
 
+    def test_default_mahaguru_timeout(self):
+        """Default MAHAGURU_API_TIMEOUT is 180."""
+        s = AppConfig()
+        assert s.MAHAGURU_API_TIMEOUT == 180
+
     def test_config_singleton_loads(self):
         """Global config object loads without error."""
         assert config is not None

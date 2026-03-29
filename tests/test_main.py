@@ -1,6 +1,6 @@
 """Tests for MCP tools defined in main.py."""
 import pytest
-from main import (
+from api.mcp_tools import (
     semantic_code_search,
     index_folder,
     list_indexed_projects,
@@ -11,19 +11,21 @@ from main import (
 class TestIndexFolder:
     """Tests for the index_folder MCP tool."""
 
-    def test_invalid_path_returns_error(self):
+    @pytest.mark.asyncio
+    async def test_invalid_path_returns_error(self):
         """Non-existent path returns error."""
-        result = index_folder(
+        result = await index_folder(
             "/nonexistent/path/xyz"
         )
         assert "Error" in result
 
-    def test_valid_folder(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_valid_folder(self, tmp_path):
         """Indexing a valid folder succeeds."""
         sample = tmp_path / "example.py"
         sample.write_text("x = 1\n")
-        result = index_folder(str(tmp_path))
-        assert "Successfully" in result
+        result = await index_folder(str(tmp_path))
+        assert "initiated" in result.lower()
 
 
 class TestSemanticCodeSearch:
@@ -51,7 +53,7 @@ class TestGetIndexStats:
         """Stats output contains key metrics."""
         result = get_index_stats()
         assert "Total indexed chunks" in result
-        assert "Collection" in result
+        assert "Projects" in result
 
 
 class TestMCPIntegration:
@@ -78,7 +80,7 @@ class TestMCPIntegration:
         }]
 
         # 2. Use a patch to inject the mock
-        with patch('main.get_searcher', return_value=mock_searcher):
+        with patch('api.mcp_tools.get_searcher', return_value=mock_searcher):
             # 3. Call the tool via mcp.call_tool (the official way to invoke it)
             # FastMCP returns a tuple: (list_of_content_objects, extra_metadata_dict)
             content_list, _ = await mcp.call_tool("semantic_code_search", arguments={"query": "test query"})

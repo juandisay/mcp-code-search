@@ -1,4 +1,5 @@
 import logging
+import re
 import httpx
 from config import config
 
@@ -9,7 +10,8 @@ class MahaguruClient:
 
     def __init__(self):
         self._client = httpx.AsyncClient()
-        self.timeout = 60.0  # Planning might take longer
+        # DEEP REASONING: Mahaguru (Planning) needs more time to analyze and 'think' (Pillar III).
+        self.timeout = config.MAHAGURU_API_TIMEOUT
 
     async def close(self):
         """Close the internal HTTP client."""
@@ -26,8 +28,11 @@ class MahaguruClient:
                 "You are Mahaguru, a Senior Technical Architect and Teacher. "
                 "Your role is to refine the implementation strategy for a Worker model (Gemini Flash). "
                 "Provide clear, high-level structural guidance, best practices, and a refined plan. "
-                "Focus on robustness, scalability, and project-specific consistency. "
-                "If 'Code Context' is provided, use it to make your suggestions concrete and actionable."
+                "Focus on robustness, scalability, and project-specific consistency.\n\n"
+                "CRITICAL INSTRUCTION: You must begin your response with a <thinking> block. "
+                "Inside this block, analyze the provided context, the user brief, and perform a "
+                "step-by-step reasoning phase before proposing the architecture. "
+                "After closing the </thinking> block, provide the final action-oriented implementation plan."
             )
 
         if not config.MAHAGURU_API_KEY:
@@ -71,6 +76,7 @@ class MahaguruClient:
                     {"role": "user", "content": user_content}
                 ],
                 "temperature": 0.2,
+                "max_tokens": 8192,  # Ensure enough space for the reasoning phase
             }
 
             try:
@@ -96,8 +102,22 @@ class MahaguruClient:
                 data = response.json()
                 
                 if "choices" in data and len(data["choices"]) > 0:
+                    raw_content = data["choices"][0]["message"]["content"]
                     logger.info("Successfully received refinement from model: %s", model_name)
-                    return data["choices"][0]["message"]["content"]
+                    
+                    # Distillation Phase (Pillar III: Efficient context management)
+                    # Support both <thinking> and <think> (DeepSeek-R1)
+                    think_match = re.search(r'<(?:think|thinking)>(.*?)</(?:think|thinking)>', raw_content, flags=re.DOTALL | re.IGNORECASE)
+                    if think_match:
+                        thinking_process = think_match.group(1).strip()
+                        logger.info("--- Mahaguru Thinking Process ---\n%s", thinking_process)
+                        
+                        # Strip thinking from the plan to keep the Worker focused
+                        final_plan = re.sub(r'<(?:think|thinking)>.*?</(?:think|thinking)>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    else:
+                        final_plan = raw_content.strip()
+                    
+                    return final_plan
                 else:
                     logger.error("Unexpected response format from model %s: %s", model_name, data)
                     errors.append(f"{model_name}: Unexpected format")

@@ -1,412 +1,49 @@
-"""Entry point — FastAPI management + MCP server."""
+"""Entry point — FastAPI management + MCP server orchestrator."""
 import asyncio
 import logging
-import os
 import sys
-import threading
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel
 
 from config import config
 from core.logger import setup_logging
-from core.mahaguru_client import mahaguru_client
-from core.rule_manager import rule_manager
-from core.token_manager import token_manager
+from core.dependencies import get_indexer, shutdown_dependencies
+from core.utils import run_background_indexing
+from api.mcp_tools import register_mcp_tools
+from api.fastapi_routes import router as api_router
 
-# When running as MCP stdio server, ALL logging MUST go to stderr.
-# Writing anything to stdout corrupts the JSON-RPC framing and causes EOF.
+# 1. Transport-agnostic diagnostic setup
 _MCP_MODE = "--mcp" in sys.argv
 setup_logging(level=logging.INFO, mcp_mode=_MCP_MODE)
 logger = logging.getLogger(__name__)
 
-# --------------------------------------------------------- #
-#  Core Services (Lazy-initialized & Thread-safe Singleton)  #
-# --------------------------------------------------------- #
-_indexer = None
-_searcher = None
-_watcher = None
-
-_indexer_lock = threading.Lock()
-_searcher_lock = threading.Lock()
-_watcher_lock = threading.Lock()
-
-
-def get_indexer():
-    """Retrieve or initialize the CodeIndexer singleton (Thread-Safe)."""
-    global _indexer
-    if _indexer is None:
-        with _indexer_lock:
-            if _indexer is None:
-                from core.indexer import CodeIndexer
-                logger.info("Initializing CodeIndexer singleton...")
-                _indexer = CodeIndexer(app_config=config)
-    return _indexer
-
-
-def get_searcher():
-    """Retrieve or initialize the CodeSearcher singleton (Thread-Safe)."""
-    global _searcher
-    if _searcher is None:
-        with _searcher_lock:
-            if _searcher is None:
-                from core.searcher import CodeSearcher
-                logger.info("Initializing CodeSearcher singleton...")
-                _searcher = CodeSearcher(app_config=config)
-    return _searcher
-
-
-def get_watcher():
-    """Retrieve or initialize the ProjectWatcher singleton (Thread-Safe)."""
-    global _watcher
-    if _watcher is None:
-        with _watcher_lock:
-            if _watcher is None:
-                from core.watcher import ProjectWatcher
-                logger.info("Initializing ProjectWatcher singleton...")
-                _watcher = ProjectWatcher(get_indexer())
-    return _watcher
-
-
-# --------------------------------------------------------- #
-#  MCP Server                                               #
-# --------------------------------------------------------- #
+# 2. Define MCP Server and Register Tools
 mcp = FastMCP("CodeMemoryMCP")
+register_mcp_tools(mcp)
 
-
-def _format_search_results(results: list) -> str:
-    """Helper to format search results into a clean string."""
-    if not results:
-        return "No relevant code snippets found."
-
-    lines = []
-    for i, res in enumerate(results):
-        dist = res.get("distance")
-        dist_info = f" (distance: {dist:.4f})" if dist is not None else ""
-        proj = res.get("project_name", "Unknown")
-        lines.append(
-            f"--- Snippet {i + 1}{dist_info} ---\n"
-            f"File: {res['file_path']} (Line {res['start_line']})\n"
-            f"Project: {proj}\n"
-            f"Code:\n{res['snippet']}\n"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def semantic_code_search(
-    query: str,
-    n_results: int = 3,
-    project_name: str = None,
-    max_distance: float = None,
-    language: list[str] = None,
-    file_path_includes: str = None,
-    excluded_dirs: list[str] = None,
-    re_rank: bool = None,
-) -> str:
-    """Search for code snippets via NLP query.
-
-    Args:
-        query: What to find, e.g. 'S3 upload'.
-        n_results: Number of results.
-        project_name: Filter by project.
-        max_distance: Relevance threshold.
-        language: Filter by file extension(s) (e.g. ['.py', '.ts']).
-        file_path_includes: Require a specific substring in file path.
-        excluded_dirs: Exclude dirs from search (e.g. ['node_modules']).
-        re_rank: Whether to use cross-encoder reranking.
-    """
-    results = get_searcher().search(
-        query, n_results, project_name, max_distance,
-        language=language, file_path_includes=file_path_includes,
-        excluded_dirs=excluded_dirs, re_rank=re_rank
-    )
-    output = _format_search_results(results)
-    total_tokens = token_manager.count_tokens(output)
-    return output + token_manager.format_usage_summary(total_tokens)
-
-
-@mcp.tool()
-def index_folder(folder_path: str) -> str:
-    """Index a local project folder.
-
-    Args:
-        folder_path: Absolute path to the folder.
-    """
-    if not os.path.isdir(folder_path):
-        return (
-            f"Error: '{folder_path}' does not exist"
-            " or is not a directory."
-        )
-
-    try:
-        summary = get_indexer().index_project_folder(
-            folder_path
-        )
-        # Start watching after initial index
-        get_watcher().start(folder_path)
-        # For indexing, we can't easily count tokens of everything
-        # without reading it all again, but CodeIndexer already
-        # has the content during processing.
-        # Let's just report success here.
-        return (
-            f"Successfully indexed: {folder_path}\n"
-            f"Files processed: "
-            f"{summary['files_processed']}, "
-            f"Skipped: {summary['files_skipped']}, "
-            f"Chunks: {summary['chunks_upserted']}\n"
-            f"Total tokens indexed: {summary['total_tokens']}"
-        )
-    except Exception as e:
-        return f"Error during indexing: {e}"
-
-
-@mcp.tool()
-def list_indexed_projects() -> str:
-    """List all indexed project names."""
-    projects = get_indexer().list_projects()
-    if not projects:
-        return "No projects have been indexed yet."
-    return "Indexed projects:\n" + "\n".join(
-        f"  - {p}" for p in projects
-    )
-
-
-@mcp.tool()
-def delete_project(project_name: str) -> str:
-    """Delete an indexed project and all its data.
-
-    Args:
-        project_name: Name of the project to delete.
-    """
-    try:
-        summary = get_indexer().delete_project(project_name)
-        if summary["deleted_chunks"] == 0:
-            return f"Project '{project_name}' not found or already empty."
-
-        return (
-            f"Successfully deleted project: {project_name}\n"
-            f"Chunks removed: {summary['deleted_chunks']}\n"
-            f"Files removed from index: {summary['deleted_files']}"
-        )
-    except Exception as e:
-        return f"Error deleting project: {e}"
-
-
-@mcp.tool()
-def get_index_stats() -> str:
-    """Get code search index statistics."""
-    collection = get_indexer().collection
-    count = collection.count()
-    projects = get_indexer().list_projects()
-    proj_str = (
-        ", ".join(projects) if projects else "none"
-    )
-    return (
-        f"Total indexed chunks: {count}\n"
-        f"Collection: {collection.name}\n"
-        f"Storage: {config.CHROMA_DATA_PATH}\n"
-        f"Projects ({len(projects)}): {proj_str}"
-    )
-
-
-@mcp.tool()
-def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
-    """Init or update Antigravity agent rules based on its detected stack.
-
-    Args:
-        folder_path: Absolute path to the project.
-        context_notes: Additional custom requirements or context to inject.
-    """
-    if not os.path.isdir(folder_path):
-        return f"Error: '{folder_path}' does not exist or is not a directory."
-
-    try:
-        overview = rule_manager.sync_rules(folder_path, context_notes)
-        init_str = ", ".join(overview["initialized"]) or "None"
-        up_str = ", ".join(overview["updated"]) or "None"
-        skip_str = ", ".join(overview["skipped"]) or "None"
-
-        return (
-            f"Rule Sync Complete for {folder_path}\n"
-            f"Initialized: {init_str}\n"
-            f"Updated: {up_str}\n"
-            f"Skipped: {skip_str}"
-        )
-    except Exception as e:
-        return f"Error syncing rules: {e}"
-
-
-def is_path_safe(file_path: str) -> bool:
-    """Check if the file path is within allowed context roots (Pillar III)."""
-    try:
-        abs_path = os.path.abspath(file_path)
-        return any(abs_path.startswith(os.path.abspath(root)) for root in config.ALLOWED_CONTEXT_ROOTS)
-    except Exception:
-        return False
-
-def read_file_chunked(file_path: str, max_bytes: int = 102400) -> str:
-    """Read file content in chunks with a hard limit to prevent memory exhaustion."""
-    content = ""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            while len(content) < max_bytes:
-                chunk = f.read(4096)
-                if not chunk:
-                    break
-                content += chunk
-            if len(content) >= max_bytes:
-                content += "\n... (truncated due to size limit) ...\n"
-        return content
-    except UnicodeDecodeError:
-        return "[Error: Unable to decode file as UTF-8 text (possibly binary)]"
-    except Exception as e:
-        return f"[Error reading file: {str(e)}]"
-
-@mcp.tool()
-async def request_mahaguru_refinement(
-    refinement_brief: str,
-    relevant_files: list[str] = None
-) -> str:
-    """Escalate a task to the Mahaguru (Teacher/Planner) model for refinement.
-
-    Use this when:
-    - You've hit the 3-strike rule on a bug.
-    - The task requires high-level architectural planning.
-    - You need guidance on project-specific patterns.
-
-    Args:
-        refinement_brief: A clear summary of the problem, what's been tried, and the roadblock.
-        relevant_files: List of absolute file paths to include as context.
-    """
-    files_count = len(relevant_files) if relevant_files else 0
-    logger.info("Mahaguru refinement requested with %d files...", files_count)
-
-    # 1. Automatic RAG Context (semantic search)
-    rag_context = ""
-    try:
-        searcher = get_searcher()
-        search_results = searcher.search(
-            query=refinement_brief,
-            n_results=config.MAHAGURU_AUTO_CONTEXT_COUNT
-        )
-        if search_results:
-            rag_context = (
-                "### AUTO-RETRIEVED CONTEXT FROM INDEXER\n"
-                "The following snippets were found based on semantic relevance to your request:\n\n"
-                + _format_search_results(search_results)
-            )
-    except Exception as e:
-        logger.warning("Failed to auto-retrieve RAG context for Mahaguru: %s", e)
-
-    # 2. File Context (explicitly requested files)
-    file_context = ""
-    if relevant_files:
-        context_parts = []
-        for file_path in relevant_files:
-            # Sandboxing (Security)
-            if not is_path_safe(file_path):
-                logger.warning("Blocked access to unsafe file path: %s", file_path)
-                context_parts.append(f"### File: {file_path}\n[Access Denied: Path outside allowed context roots]")
-                continue
-
-            # Existence Check & Chunked Reading (Performance)
-            if os.path.isfile(file_path):
-                content = read_file_chunked(file_path, max_bytes=config.MAX_CONTEXT_FILE_SIZE)
-                context_parts.append(f"### File: {file_path}\n```\n{content}\n```")
-            else:
-                context_parts.append(f"### File: {file_path}\n[Error: File not found]")
-
-        file_context = "\n\n".join(context_parts)
-
-    # 3. Combine Context with Token Budgeting
-    full_context = ""
-    total_tokens = 0
-
-    # Prioritize RAG context if small, then files
-    if rag_context:
-        full_context += rag_context + "\n\n"
-        total_tokens += token_manager.count_tokens(rag_context)
-
-    if file_context:
-        file_tokens = token_manager.count_tokens(file_context)
-        if total_tokens + file_tokens > config.MAX_TOTAL_CONTEXT_TOKENS:
-            logger.warning("Context exceeds token limit. Truncating file context.")
-            # Simple truncation for now, could be smarter
-            full_context += "### (Truncated File Context)\n"
-        else:
-            full_context += file_context
-
-    response = await mahaguru_client.get_refinement(refinement_brief, code_context=full_context)
-
-    output = (
-        "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
-        f"{response}\n\n"
-        "--- END OF REFINEMENT ---"
-    )
-
-    total_tokens = token_manager.count_tokens(output)
-    return output + token_manager.format_usage_summary(total_tokens)
-
-
-# --------------------------------------------------------- #
-#  FastAPI Server (Management Layer)                        #
-# --------------------------------------------------------- #
-
-
-def _run_background_indexing(folder_path: str):
-    """Run indexing in a background thread."""
-    if os.path.isdir(folder_path):
-        try:
-            summary = get_indexer().index_project_folder(
-                folder_path
-            )
-            logger.info(
-                "Auto-indexing done for %s — Chunks: %s, Tokens: %s",
-                folder_path,
-                summary['chunks_upserted'],
-                summary['total_tokens']
-            )
-            # Start watching after initial index
-            get_watcher().start(folder_path)
-        except Exception as e:
-            logger.error(
-                "Error during auto-indexing: %s", e
-            )
-    else:
-        logger.warning(
-            "Auto-index folder ignored: %s "
-            "(does not exist)", folder_path,
-        )
-
-
+# 3. Define FastAPI Server with Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage service lifecycles (Pillar III)."""
-    # 1. Initialize Indexer (starts consumer thread & writer conn)
+    # Initialize Core Service
     indexer = get_indexer()
-
-    # 2. Auto-index on startup if configured (PRD §6.2)
+    
+    # Auto-index on startup if configured (PRD §6.2)
     if config.PROJECT_FOLDER_TO_INDEX:
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
             None,
-            _run_background_indexing,
+            run_background_indexing,
             config.PROJECT_FOLDER_TO_INDEX,
         )
 
     yield
 
-    # 3. Graceful Shutdown
+    # Graceful Shutdown
     logger.info("Lifespan: Shutting down services...")
-    if _watcher:
-        _watcher.stop()
-
-    if _indexer:
-        _indexer.shutdown()
-
+    shutdown_dependencies()
 
 app = FastAPI(
     title="Code-Memory API",
@@ -415,97 +52,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Mount FastAPI routes
+app.include_router(api_router)
 
-class IndexRequest(BaseModel):
-    """POST /index request body."""
-
-    folder_path: str
-
-
-class SyncRequest(BaseModel):
-    """POST /sync-rules request body."""
-
-    folder_path: str
-    context_notes: str = ""
-
-
-@app.post("/index")
-async def api_index_folder(
-    req: IndexRequest,
-    background_tasks: BackgroundTasks,
-):
-    """Trigger indexing of a folder (PRD §6.2)."""
-    if not os.path.isdir(req.folder_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder path",
-        )
-
-    background_tasks.add_task(
-        _run_background_indexing, req.folder_path
-    )
-    return {
-        "message": "Indexing started in background",
-        "folder_path": req.folder_path,
-    }
-
-
-@app.get("/health")
-async def api_health():
-    """Liveliness check (Pillar II)."""
-    return {"status": "ok", "version": "1.0.0"}
-
-
-@app.get("/stats")
-async def api_stats():
-    """Return ChromaDB stats (PRD §6.2)."""
-    collection = get_indexer().collection
-    count = collection.count()
-    projects = get_indexer().list_projects()
-    return {
-        "total_indexed_chunks": count,
-        "collection_name": collection.name,
-        "chroma_data_path": config.CHROMA_DATA_PATH,
-        "indexed_projects": projects,
-    }
-
-
-@app.delete("/projects/{project_name}")
-async def api_delete_project(project_name: str):
-    """Delete an indexed project."""
-    try:
-        summary = get_indexer().delete_project(project_name)
-        return {"message": "Project deleted", "summary": summary}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/sync-rules")
-async def api_sync_rules(req: SyncRequest):
-    """Trigger agent rules initialization/updating."""
-    if not os.path.isdir(req.folder_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid folder path",
-        )
-
-    try:
-        overview = rule_manager.sync_rules(req.folder_path, req.context_notes)
-        return {"message": "Rules synced", "overview": overview}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-# --------------------------------------------------------- #
-#  Entry Point                                              #
-# --------------------------------------------------------- #
+# 4. Process Entry Points
 if __name__ == "__main__":
-    import sys
-
-    if "--mcp" in sys.argv:
-        logger.info(
-            "Starting MCP server (stdio)..."
-        )
+    if _MCP_MODE:
+        logger.info("Starting MCP server (stdio transport)...")
         mcp.run()
     elif "--index" in sys.argv:
         try:
@@ -525,11 +78,5 @@ if __name__ == "__main__":
             print(f"Error during manual indexing: {e}")
     else:
         import uvicorn
-
-        logger.info(
-            "Starting FastAPI on "
-            "http://127.0.0.1:8000 ..."
-        )
-        uvicorn.run(
-            app, host="127.0.0.1", port=8000
-        )
+        logger.info("Starting FastAPI on http://127.0.0.1:8000 ...")
+        uvicorn.run(app, host="127.0.0.1", port=8000)

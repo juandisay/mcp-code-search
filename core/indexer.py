@@ -94,9 +94,6 @@ class CodeIndexer:
         self.chunk_overlap = self.config.CHUNK_OVERLAP
         self.batch_size = self.config.BATCH_SIZE
 
-        self.chunks_dir = Path(self.config.CHUNKS_STORAGE_PATH)
-        self.chunks_dir.mkdir(parents=True, exist_ok=True)
-
         self.supported_extensions = (
             AST_SUPPORTED_EXTENSIONS
             | GENERIC_EXTENSIONS
@@ -134,6 +131,12 @@ class CodeIndexer:
             CREATE TABLE IF NOT EXISTS file_state (
                 file_path TEXT PRIMARY KEY,
                 stats_str TEXT NOT NULL,
+                last_indexed REAL DEFAULT (strftime('%s', 'now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_roots (
+                folder_path TEXT PRIMARY KEY,
                 last_indexed REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
@@ -232,6 +235,23 @@ class CodeIndexer:
                     self._writer_db_conn = None
         logger.info("CodeIndexer service stopped.")
 
+    def _add_project_root(self, conn: sqlite3.Connection, folder_path: str):
+        """Record an absolute path as an indexed root."""
+        conn.execute(
+            "INSERT OR REPLACE INTO project_roots (folder_path, last_indexed) VALUES (?, ?)",
+            (folder_path, time.time())
+        )
+        conn.commit()
+
+    def get_indexed_roots(self) -> List[str]:
+        """Fetch all indexed project root paths using a read-only connection."""
+        try:
+            with self._get_read_only_conn() as conn:
+                cursor = conn.execute("SELECT folder_path FROM project_roots")
+                return [row[0] for row in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            return []
+
     def _get_splitter(self, ext: str):
         """Return an AST-aware chunker or a generic fallback splitter."""
         if ext in AST_SUPPORTED_EXTENSIONS:
@@ -253,6 +273,10 @@ class CodeIndexer:
         folder_path = os.path.abspath(folder_path)
         logger.info("Indexing project folder: %s", folder_path)
         project_name = Path(folder_path).name
+
+        # Record root for Phase 1 security check
+        with self._db_lock:
+            self._add_project_root(self._writer_db_conn, folder_path)
 
         files_to_process = []
         for root, dirs, files in os.walk(folder_path):
@@ -359,23 +383,11 @@ class CodeIndexer:
             
             start_line = content.count("\n", 0, start_idx) + 1
             
-            unique_str = f"{file_path}_{i}_{chunk}"
-            chunk_hash = hashlib.sha256(unique_str.encode()).hexdigest()
-            chunk_file_path = self.chunks_dir / f"{chunk_hash}.txt"
-
-            if not chunk_file_path.exists():
-                try:
-                    with open(chunk_file_path, "w", encoding="utf-8") as f:
-                        f.write(chunk)
-                except Exception:
-                    continue
-
             prepared_metas.append({
                 "file_path": file_path,
                 "extension": ext,
                 "start_line": start_line,
                 "project_name": project_name,
-                "chunk_file": str(chunk_file_path),
                 "model": getattr(self.collection, "name", "unknown")
             })
             prepared_ids.append(f"{file_path}_chunk_{i}")
@@ -486,11 +498,10 @@ class CodeIndexer:
             for i in range(0, len(ids_to_delete), 10000):
                 self.collection.delete(ids=ids_to_delete[i:i+10000])
 
-            for m in (metadatas or []):
-                if m and m.get("chunk_file"):
-                    p = Path(m["chunk_file"])
-                    if p.exists():
-                        p.unlink(missing_ok=True)
+            # Remove from project_roots if we can identify the folder
+            # For simplicity, we keep project_roots entries unless someone manually purges,
+            # or we could try matching folder_path by identifying all remaining and finding min prefix.
+            # However, file_paths cleanup takes care of file-level state.
 
             for fp in file_paths:
                 self._delete_file_state(self._writer_db_conn, fp)

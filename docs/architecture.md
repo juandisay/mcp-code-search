@@ -20,8 +20,10 @@ Proses pencarian dilakukan dalam dua tahap untuk menyeimbangkan kecepatan dan ak
 - **Lokasi Kode:** `core/searcher.py`
 
 ### **2.3. AI Cascading (Mahaguru Escalation)**
-Memungkinkan agen pekerja untuk mengeskalasi tugas kompleks ke model AI yang lebih kuat (Mahaguru). Sistem secara otomatis mengumpulkan konteks relevan melalui pencarian RAG dan pembacaan file yang ditentukan.
-- **Lokasi Kode:** `core/mahaguru_client.py`
+Memungkinkan agen pekerja untuk mengeskalasi tugas kompleks ke model AI yang lebih kuat (Mahaguru). Sistem mendukung dua mode:
+- **Blocking (Sequential):** Worker menunggu Mahaguru selesai merespons.
+- **Non-Blocking (Parallel):** Worker memicu tugas di latar belakang menggunakan `PlanningJobManager` dan melanjutkan tugas lainnya.
+- **Lokasi Kode:** `core/mahaguru_client.py` & `core/job_manager.py`
 
 ### **2.4. Idempotent Indexing**
 Menggunakan database state (SQLite) untuk melacak `mtime` dan `size` setiap file. File yang tidak berubah tidak akan diindeks ulang, menghemat resource secara signifikan.
@@ -47,6 +49,7 @@ graph TD
         C -- "Uses" --> H["MahaguruClient"]
         C -- "Uses" --> I["RuleManager"]
         C -- "Uses" --> J["TokenManager"]
+        C -- "Uses" --> O["PlanningJobManager"]
     end
 
     subgraph "Data & Persistence Layer"
@@ -123,6 +126,39 @@ flowchart TD
 2. **Retrieval:** ChromaDB memberikan kandidat (default 20).
 3. **Reranking:** Cross-Encoder memberikan skor relevansi baru.
 4. **Final Results:** Hasil diurutkan berdasarkan skor tertinggi dan dikembalikan ke user.
+
+
+### **4.3. Parallel Planning Flow (Asynchronous)**
+
+```mermaid
+sequenceDiagram
+    participant Worker as Worker (Kelvin)
+    participant MCP as MCP Tool (Async)
+    participant Registry as PlanningJobManager
+    participant Guru as Mahaguru (Pro/Claude)
+
+    Worker->>MCP: request_async_refinement(brief)
+    MCP->>Registry: create_job(id, Running)
+    MCP-->>Worker: Return Job ID (Immediately)
+    
+    rect rgb(200, 230, 255)
+        Note over Worker: Worker continues other tasks (Search, Lint, Fixes)
+    end
+
+    MCP->>Guru: Await API Response
+    Guru-->>MCP: Plan Delivered
+    MCP->>Registry: update_job(id, Completed, result)
+
+    Worker->>MCP: get_planning_job_result(id)
+    MCP->>Registry: check_status(id)
+    Registry-->>Worker: Return Completed Plan
+    MCP->>Registry: pop_job(id) (Memory Cleanup)
+```
+
+1. **Trigger:** Worker mengirimkan permintaan perencanaan yang berat.
+2. **Non-Blocking:** MCP tool segera mengembalikan `job_id`, membebaskan Worker untuk tugas lain.
+3. **Background Processing:** Mahaguru berpikir di latar belakang. Registry (`PlanningJobManager`) melacak statusnya secara *thread-safe*.
+4. **Retrieval & GC:** Worker mengambil hasil saat siap. Registry secara otomatis menghapus data dari memori (*Popping*) setelah dikonsumsi untuk mencegah kebocoran memori.
 
 
 ## **5. Teknologi yang Digunakan**

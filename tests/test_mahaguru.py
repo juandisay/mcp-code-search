@@ -41,6 +41,8 @@ async def test_mahaguru_client_success(mock_config_key):
         # Verify it used the first model in the list
         args, kwargs = mock_post.call_args
         assert kwargs["json"]["model"] == config.MODELS[0]
+        assert kwargs["json"]["max_tokens"] == 8192
+        assert client.timeout == config.MAHAGURU_API_TIMEOUT
     
     await client.close()
 
@@ -119,5 +121,81 @@ async def test_mahaguru_client_bad_format(mock_config_key):
         result = await client.get_refinement("Test bad format")
         assert result == "Success after bad format"
         assert mock_post.call_count == 2
+    
+    await client.close()
+@pytest.mark.asyncio
+async def test_mahaguru_distillation_standard(mock_config_key):
+    """Test that <thinking> block is stripped from the final output."""
+    client = MahaguruClient()
+    mock_response_data = {
+        "choices": [
+            {
+                "message": {
+                    "content": "<thinking>\nAnalyzing deep context...\n</thinking>\nFinal Plan: Update the indexer."
+                }
+            }
+        ]
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.raise_for_status = lambda: None
+
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        result = await client.get_refinement("Test thinking block")
+        
+        assert result == "Final Plan: Update the indexer."
+        assert "<thinking>" not in result
+    
+    await client.close()
+
+@pytest.mark.asyncio
+async def test_mahaguru_distillation_deepseek(mock_config_key):
+    """Test that DeepSeek-style <think> block is stripped."""
+    client = MahaguruClient()
+    mock_response_data = {
+        "choices": [
+            {
+                "message": {
+                    "content": "<think>\nThinking like DeepSeek...\n</think>\nStep 1: Fix bug."
+                }
+            }
+        ]
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.raise_for_status = lambda: None
+
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        result = await client.get_refinement("Test think block")
+        
+        assert result == "Step 1: Fix bug."
+        assert "<think>" not in result
+    
+    await client.close()
+
+@pytest.mark.asyncio
+async def test_mahaguru_no_thinking_block(mock_config_key):
+    """Test that it still works if no thinking block is provided."""
+    client = MahaguruClient()
+    mock_response_data = {
+        "choices": [{"message": {"content": "Direct plan without thinking block."}}]
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.raise_for_status = lambda: None
+
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        result = await client.get_refinement("Test no thinking")
+        
+        assert result == "Direct plan without thinking block."
     
     await client.close()

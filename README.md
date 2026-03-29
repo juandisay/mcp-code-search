@@ -12,6 +12,7 @@
 - 📦 **AST-based Smart Chunking** — Language-aware splitting (Python, JS, TS, Go, Java, Markdown) that preserves functional context.
 - 🔄 **Real-time File Watcher** — Automatically re-indexes changed files to keep your "memory" always fresh.
 - 🎓 **AI Cascading (Mahaguru)** — Escalate complex tasks to high-level planner models with automatic RAG context.
+- ⚡ **Parallel AI Collaboration** — Support for non-blocking, asynchronous planning tasks that allow Worker and Mahaguru to work in parallel.
 - 🔌 **MCP Protocol** — Native integration as an MCP server for Claude Desktop, Cursor, Antigravity, and more.
 - 🔒 **Privacy First** — 100% local processing; no code leaves your machine for indexing or search.
 
