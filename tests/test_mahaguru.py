@@ -37,7 +37,7 @@ async def test_mahaguru_client_success(mock_config_key):
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_response
 
-        result = await client.get_refinement("Bug in indexer")
+        result, _ = await client.get_refinement("Bug in indexer")
 
         assert "Refined Plan" in result
         assert mock_post.called
@@ -68,7 +68,7 @@ async def test_mahaguru_auto_switch(mock_config_key):
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.side_effect = [mock_response_429, mock_response_success]
 
-        result = await client.get_refinement("Test switch")
+        result, _ = await client.get_refinement("Test switch")
 
         assert result == "Switch successful"
         assert mock_post.call_count == 2
@@ -87,7 +87,7 @@ async def test_mahaguru_client_http_error(mock_config_key):
 
     # All models fail with Connect Error
     with patch.object(client._client, "post", side_effect=Exception("Connect Error")):
-        result = await client.get_refinement("Test brief")
+        result, _ = await client.get_refinement("Test brief")
         assert "Error: All Mahaguru models failed" in result
         assert "Connect Error" in result
 
@@ -121,7 +121,7 @@ async def test_mahaguru_client_bad_format(mock_config_key):
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.side_effect = [mock_response_bad, mock_response_success]
 
-        result = await client.get_refinement("Test bad format")
+        result, _ = await client.get_refinement("Test bad format")
         assert result == "Success after bad format"
         assert mock_post.call_count == 2
 
@@ -147,7 +147,7 @@ async def test_mahaguru_distillation_standard(mock_config_key):
 
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_response
-        result = await client.get_refinement("Test thinking block")
+        result, _ = await client.get_refinement("Test thinking block")
 
         assert result == "Final Plan: Update the indexer."
         assert "<thinking>" not in result
@@ -175,7 +175,7 @@ async def test_mahaguru_distillation_deepseek(mock_config_key):
 
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_response
-        result = await client.get_refinement("Test think block")
+        result, _ = await client.get_refinement("Test think block")
 
         assert result == "Step 1: Fix bug."
         assert "<think>" not in result
@@ -197,7 +197,7 @@ async def test_mahaguru_no_thinking_block(mock_config_key):
 
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = mock_response
-        result = await client.get_refinement("Test no thinking")
+        result, _ = await client.get_refinement("Test no thinking")
 
         assert result == "Direct plan without thinking block."
 

@@ -139,14 +139,19 @@ async def request_mahaguru_refinement(
         relevant_files
     )
 
-    response = await mahaguru_client.get_refinement(
+    response_text, structured_plan = await mahaguru_client.get_refinement(
         refinement_brief,
         code_context=full_context
     )
 
+    # PILLAR IV: If we have a structured plan, we can log it or process it.
+    # For the MCP output, we return the text, but the structured plan is available.
+    if structured_plan:
+        logger.info("Mahaguru provided a structured plan with %d tasks.", len(structured_plan.get("tasks", [])))
+
     output = (
         "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
-        f"{response}\n\n"
+        f"{response_text}\n\n"
         "--- END OF REFINEMENT ---"
     )
 
@@ -162,14 +167,14 @@ async def _run_background_refinement(job_id: str, refinement_brief: str, relevan
             refinement_brief,
             relevant_files
         )
-        response = await mahaguru_client.get_refinement(
+        response_text, _ = await mahaguru_client.get_refinement(
             refinement_brief,
             code_context=full_context
         )
 
         output = (
             "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
-            f"{response}\n\n"
+            f"{response_text}\n\n"
             "--- END OF REFINEMENT ---"
         )
         planning_job_manager.complete_job(job_id, output)

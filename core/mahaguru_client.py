@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -19,8 +20,18 @@ class MahaguruClient:
         """Close the internal HTTP client."""
         await self._client.aclose()
 
-    async def get_refinement(self, refinement_brief: str, code_context: str = None, system_prompt: str = None) -> str:
-        """Sends a refinement brief to Mahaguru and returns the response.
+    def _extract_json_plan(self, content: str) -> dict:
+        """Extracts the structured JSON plan from the Mahaguru response."""
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', content, flags=re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError as e:
+                logger.warning("Failed to parse Mahaguru JSON plan: %s", e)
+        return {}
+
+    async def get_refinement(self, refinement_brief: str, code_context: str = None, system_prompt: str = None) -> tuple[str, dict]:
+        """Sends a refinement brief to Mahaguru and returns a tuple (text_plan, structured_plan).
         
         Tries multiple models from config.MODELS in sequence if failures occur.
         """
@@ -33,13 +44,20 @@ class MahaguruClient:
                 "Focus on robustness, scalability, and project-specific consistency.\n\n"
                 "CRITICAL INSTRUCTION: You must begin your response with a <thinking> block. "
                 "Inside this block, analyze the provided context, the user brief, and perform a "
-                "step-by-step reasoning phase before proposing the architecture. "
-                "After closing the </thinking> block, provide the final action-oriented implementation plan."
+                "step-by-step reasoning phase before proposing the architecture.\n\n"
+                "After closing the </thinking> block, you MUST provide the final implementation plan. "
+                "The plan MUST include a strict JSON block enclosed in ```json containing an "
+                "execution plan for the Worker. Example format:\n"
+                "{\n"
+                "  \"tasks\": [\n"
+                "    {\"file\": \"core/indexer.py\", \"action\": \"modify\", \"description\": \"Add FTS5 support\"}\n"
+                "  ]\n"
+                "}"
             )
 
         if not config.MAHAGURU_API_KEY:
             logger.error("MAHAGURU_API_KEY is not set in configuration.")
-            return "Error: MAHAGURU_API_KEY is missing. Please set it in your .env file to enable AI Cascading."
+            return "Error: MAHAGURU_API_KEY is missing. Please set it in your .env file to enable AI Cascading.", {}
 
         # Pre-flight context management (Pillar III)
         from core.token_manager import token_manager
@@ -119,7 +137,15 @@ class MahaguruClient:
                     else:
                         final_plan = raw_content.strip()
 
-                    return final_plan
+                    # PILLAR IV: Structured AI Cascading (JSON Plan Extraction)
+                    json_plan = self._extract_json_plan(final_plan)
+                    if json_plan:
+                        logger.info("Successfully extracted structured JSON plan from Mahaguru.")
+                        # We append the JSON plan to the end of the text plan for visibility
+                        # but the caller can also use the structured data if we change the return type.
+                        # For now, we return the whole plan, but the Worker can see the JSON block.
+
+                    return final_plan, json_plan
                 else:
                     logger.error("Unexpected response format from model %s: %s", model_name, data)
                     errors.append(f"{model_name}: Unexpected format")
@@ -138,7 +164,7 @@ class MahaguruClient:
         # If we reach here, all models failed
         error_summary = "; ".join(errors)
         logger.error("All Mahaguru models failed: %s", error_summary)
-        return f"Error: All Mahaguru models failed. Details: {error_summary}"
+        return f"Error: All Mahaguru models failed. Details: {error_summary}", {}
 
 # Singleton instance
 mahaguru_client = MahaguruClient()

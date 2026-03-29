@@ -140,6 +140,65 @@ class CodeIndexer:
                 last_indexed REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
+        
+        # Priority 1: Hybrid Search (FTS5)
+        # Create FTS5 virtual table for external content
+        # We index 'content' and 'file_path' for keyword search
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
+                content,
+                file_path,
+                project_name UNINDEXED,
+                chunk_id UNINDEXED,
+                content='' -- External content (we store it in Chroma, but keep a copy for FTS if needed, or just index it)
+            )
+        """)
+        
+        # Actually, for "external content" FTS5 usually points to another table.
+        # But since Chroma holds the content, we'll store a copy in a regular SQLite table 
+        # to act as the 'external content' for FTS5, or just use a standard FTS5 table if space permits.
+        # Given the "Senior Developer" mindset, let's use a content table for better FTS5 performance and management.
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunk_content (
+                chunk_id TEXT PRIMARY KEY,
+                file_path TEXT,
+                project_name TEXT,
+                content TEXT
+            )
+        """)
+        
+        # Re-create FTS5 linked to chunk_content
+        conn.execute("DROP TABLE IF EXISTS chunk_fts")
+        conn.execute("""
+            CREATE VIRTUAL TABLE chunk_fts USING fts5(
+                content,
+                file_path,
+                project_name UNINDEXED,
+                chunk_id UNINDEXED,
+                content='chunk_content',
+                content_rowid='rowid'
+            )
+        """)
+        
+        # Triggers for automatic FTS5 synchronization
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS chunk_content_ai AFTER INSERT ON chunk_content BEGIN
+                INSERT INTO chunk_fts(rowid, content, file_path) VALUES (new.rowid, new.content, new.file_path);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS chunk_content_ad AFTER DELETE ON chunk_content BEGIN
+                INSERT INTO chunk_fts(chunk_fts, rowid, content, file_path) VALUES('delete', old.rowid, old.content, old.file_path);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS chunk_content_au AFTER UPDATE ON chunk_content BEGIN
+                INSERT INTO chunk_fts(chunk_fts, rowid, content, file_path) VALUES('delete', old.rowid, old.content, old.file_path);
+                INSERT INTO chunk_fts(rowid, content, file_path) VALUES (new.rowid, new.content, new.file_path);
+            END
+        """)
+        
         conn.commit()
 
     def _get_read_only_conn(self) -> sqlite3.Connection:
@@ -187,10 +246,31 @@ class CodeIndexer:
                             embeddings=batch.embeddings,
                             metadatas=batch.metadatas
                         )
+                        
+                        # Priority 1: Hybrid Search (FTS5)
+                        # Sync chunk_content for FTS5
+                        # First, clear existing chunks for this file to avoid duplicates on re-index
+                        self._writer_db_conn.execute("DELETE FROM chunk_content WHERE file_path = ?", (batch.file_path,))
+                        
+                        # Prepare batch for SQLite insertion
+                        # chunk_id, file_path, project_name, content
+                        sqlite_batch = []
+                        for i, cid in enumerate(batch.ids):
+                            project_name = batch.metadatas[i].get("project_name", "unknown")
+                            sqlite_batch.append((cid, batch.file_path, project_name, batch.docs[i]))
+                        
+                        self._writer_db_conn.executemany(
+                            "INSERT INTO chunk_content (chunk_id, file_path, project_name, content) VALUES (?, ?, ?, ?)",
+                            sqlite_batch
+                        )
+                        
                         # 3. Update File State only after DB success
                         self._update_file_state(self._writer_db_conn, batch.file_path, batch.stats_str)
+                        
+                        self._writer_db_conn.commit()
                 except Exception as e:
                     logger.error("Consumer failed to write batch for %s: %s", batch.file_path, e)
+                    self._writer_db_conn.rollback()
                 finally:
                     self.work_queue.task_done()
 
@@ -213,8 +293,9 @@ class CodeIndexer:
             self._consumer_thread = None
 
     def _delete_file_state(self, conn: sqlite3.Connection, file_path: str):
-        """Remove a file from the state DB using provided connection."""
+        """Remove a file from the state DB and chunk content (Pillar I/Priority 1)."""
         conn.execute("DELETE FROM file_state WHERE file_path = ?", (file_path,))
+        conn.execute("DELETE FROM chunk_content WHERE file_path = ?", (file_path,))
         conn.commit()
 
     def shutdown(self):

@@ -48,6 +48,8 @@ class AppConfig(BaseSettings):
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RE_RANK_LIMIT: int = 20
     USE_RERANKER: bool = True
+    USE_HYBRID_SEARCH: bool = True
+    RRF_K: int = 60
 
     # Mahaguru RAG Tuning
     MAHAGURU_AUTO_CONTEXT_COUNT: int = 5

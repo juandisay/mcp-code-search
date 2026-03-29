@@ -34,7 +34,7 @@ async def test_request_async_mahaguru_refinement_creation(mock_assemble, mock_ge
     """Test 1: Verify job creation returns a valid ID and enters 'Running' state."""
 
     # Setup mock to return immediately
-    mock_get_refinement.return_value = "Mocked Plan"
+    mock_get_refinement.return_value = ("Mocked Plan", {})
 
     response = await request_async_mahaguru_refinement("Test brief", ["file1.py"])
 
@@ -64,7 +64,7 @@ async def test_get_planning_job_result_lifecycle(mock_assemble, mock_get_refinem
 
     async def controlled_mock_refinement(*args, **kwargs):
         await release_event.wait() # Pause execution here
-        return "--- MAHAGURU REFINEMENT RESPONSE ---\n\nBrilliant Architectural Plan\n\n--- END OF REFINEMENT ---"
+        return "--- MAHAGURU REFINEMENT RESPONSE ---\n\nBrilliant Architectural Plan\n\n--- END OF REFINEMENT ---", {}
 
     mock_get_refinement.side_effect = controlled_mock_refinement
 
@@ -135,7 +135,7 @@ async def test_edge_case_concurrent_job_creation(mock_assemble, mock_get_refinem
     release_event = asyncio.Event()
     async def controlled_mock(*args, **kwargs):
         await release_event.wait()
-        return "Done"
+        return "Done", {}
     mock_get_refinement.side_effect = controlled_mock
 
     # Create 10 jobs concurrently

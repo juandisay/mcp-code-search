@@ -26,7 +26,7 @@ async def test_request_mahaguru_refinement_success():
         mock_searcher.search.return_value = []
         mock_get_searcher.return_value = mock_searcher
 
-        mock_get.return_value = mock_response
+        mock_get.return_value = (mock_response, {})
 
         result = await request_mahaguru_refinement("Test brief")
 
@@ -56,7 +56,7 @@ async def test_request_mahaguru_refinement_with_context(tmp_path):
 
         # Allow the test file
         mock_safe.return_value = True
-        mock_get.return_value = mock_response
+        mock_get.return_value = (mock_response, {})
 
         result = await request_mahaguru_refinement("Fix this", relevant_files=[str(test_file)])
 
@@ -74,7 +74,7 @@ async def test_request_mahaguru_refinement_error():
     mock_error = "Error: Failed to contact API"
 
     with patch("core.mahaguru_client.mahaguru_client.get_refinement", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_error
+        mock_get.return_value = (mock_error, {})
 
         result = await request_mahaguru_refinement("Test brief")
 
