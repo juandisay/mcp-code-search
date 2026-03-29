@@ -1,15 +1,15 @@
 """Semantic search queries against ChromaDB."""
+import concurrent.futures
+import contextlib
 import logging
 import sys
-import contextlib
-import concurrent.futures
 from typing import Any, Dict, List, Optional, Union
 
 import chromadb
 from chromadb.utils import embedding_functions
 from sentence_transformers import CrossEncoder
 
-from core.db_utils import get_collection_name # Add this
+from core.db_utils import get_collection_name  # Add this
 
 logger = logging.getLogger(__name__)
 
@@ -53,22 +53,22 @@ class CodeSearcher:
         self.chroma_client = chromadb.PersistentClient(
             path=self.config.CHROMA_DATA_PATH
         )
-        
+
         # Dependency Injection for Embedding Function
         self.embedding_fn = (
             embedding_fn or embedding_functions.DefaultEmbeddingFunction()
         )
-        
+
         # Unified Collection Naming
         coll_name = get_collection_name(self.embedding_fn)
-        
+
         self.collection = (
             self.chroma_client.get_or_create_collection(
                 name=coll_name,
                 embedding_function=self.embedding_fn,
             )
         )
-        
+
         self.max_distance = self.config.MAX_DISTANCE
         self._cross_encoder = None
 
@@ -109,15 +109,15 @@ class CodeSearcher:
         collection_count = self.collection.count()
         if collection_count == 0:
             return []
-            
+
         should_re_rank = re_rank if re_rank is not None else self.config.USE_RERANKER
-        
+
         # Stage 1: Fetch larger candidate pool if re-ranking, or exactly n_results if not
         if should_re_rank:
             initial_k = max(n_results, self.config.RE_RANK_LIMIT)
         else:
             initial_k = n_results
-        
+
         # Adjust k if we have filters that might be applied in Python
         if file_path_includes or excluded_dirs:
              initial_k = min(initial_k * 5, collection_count, 5000)
@@ -128,7 +128,7 @@ class CodeSearcher:
 
         # Build native where clause (Pillar II: push as much as possible to DB)
         where_conditions = []
-        
+
         if project_name:
             if isinstance(project_name, list):
                 if len(project_name) == 1:
@@ -137,7 +137,7 @@ class CodeSearcher:
                     where_conditions.append({"project_name": {"$in": project_name}})
             else:
                 where_conditions.append({"project_name": project_name})
-        
+
         if language:
             langs = language if isinstance(language, list) else [language]
             langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
@@ -149,7 +149,7 @@ class CodeSearcher:
         # file_path_includes as native filter (experimental but recommended by Mahaguru)
         # We try to use $contains or $like if supported, else we fall back to Python filtering
         # Since we can't easily detect support without trial, we keep Python filter as safeguard.
-        
+
         where_clause = None
         if len(where_conditions) == 1:
             where_clause = where_conditions[0]
@@ -183,13 +183,13 @@ class CodeSearcher:
         for doc, meta, dist in zip(docs, metas, distances):
             if dist is not None and dist > threshold:
                 continue
-                
+
             file_path = meta.get("file_path", "")
-            
+
             # Stage 1.5: Python-level Filtering (for things not in where clause)
             if file_path_includes and file_path_includes not in file_path:
                 continue
-                
+
             if excluded_dirs:
                 ex_dirs = excluded_dirs if isinstance(excluded_dirs, list) else [excluded_dirs]
                 if any(f"/{d.strip('/')}/" in f"/{file_path.strip('/')}/" for d in ex_dirs):
@@ -218,7 +218,7 @@ class CodeSearcher:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(32, len(candidates))) as executor:
             formatted = list(executor.map(_load_snippet, candidates))
-        
+
         if not should_re_rank:
             # Already sorted by distance from ChromaDB
             return formatted[:n_results]

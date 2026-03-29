@@ -9,10 +9,10 @@ from core.searcher import CodeSearcher
 def indexed_searcher(tmp_path_factory, app_config):
     """Index sample files and return a ready searcher."""
     tmp = tmp_path_factory.mktemp("search_project")
-    
+
     # Isolation: Use a temporary ChromaDB path for this test module
     app_config.CHROMA_DATA_PATH = str(tmp_path_factory.mktemp("chroma_db_searcher"))
-    
+
     (tmp / "math_utils.py").write_text(
         "def add(a, b):\n"
         "    return a + b\n\n"
@@ -34,7 +34,7 @@ def indexed_searcher(tmp_path_factory, app_config):
         "def hidden_add(a, b):\n"
         "    return a + b + 1\n"
     )
-    
+
     # Use DI for both Indexer and Searcher
     indexer = CodeIndexer(app_config=app_config)
     indexer.index_project_folder(str(tmp))
@@ -104,7 +104,7 @@ class TestCodeSearcher:
         """Filtering by language returns only matching extensions."""
         py_results = indexed_searcher.search("add", language=".py")
         assert all(r["file_path"].endswith(".py") for r in py_results)
-        
+
         ts_results = indexed_searcher.search("add", language=["ts"])
         assert all(r["file_path"].endswith(".ts") for r in ts_results)
         assert len(ts_results) > 0
@@ -120,7 +120,7 @@ class TestCodeSearcher:
         # 'hidden_add' is in secret_dir
         results_without_filter = indexed_searcher.search("hidden_add", n_results=5)
         assert any("secret_dir" in r["file_path"] for r in results_without_filter)
-        
+
         results_with_filter = indexed_searcher.search(
             "hidden_add", n_results=5, excluded_dirs=["secret_dir"]
         )

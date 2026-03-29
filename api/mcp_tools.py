@@ -1,14 +1,16 @@
-import os
-import logging
 import asyncio
+import logging
+import os
+
 from mcp.server.fastmcp import FastMCP
-from config import config
-from core.dependencies import get_searcher, get_indexer, get_watcher
+
+from core.chat_context import chat_context_manager
 from core.context_assembler import context_assembler
-from core.mahaguru_client import mahaguru_client
-from core.token_manager import token_manager
-from core.rule_manager import rule_manager
+from core.dependencies import get_indexer, get_searcher
 from core.job_manager import job_manager, planning_job_manager
+from core.mahaguru_client import mahaguru_client
+from core.rule_manager import rule_manager
+from core.token_manager import token_manager
 from core.utils import run_background_indexing
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ def get_index_stats() -> str:
     count = collection.count()
     projects = indexer.list_projects()
     proj_str = ", ".join(projects) if projects else "none"
-    
+
     # Active Background Jobs status feedback
     active_idx_jobs = job_manager.get_active_jobs()
     idx_str = "None"
@@ -131,14 +133,14 @@ async def request_mahaguru_refinement(
 ) -> str:
     """Escalate a task to the Mahaguru (Teacher/Planner) model for refinement."""
     logger.info("Mahaguru refinement requested...")
-    
+
     full_context = context_assembler.assemble_refinement_context(
-        refinement_brief, 
+        refinement_brief,
         relevant_files
     )
-    
+
     response = await mahaguru_client.get_refinement(
-        refinement_brief, 
+        refinement_brief,
         code_context=full_context
     )
 
@@ -157,14 +159,14 @@ async def _run_background_refinement(job_id: str, refinement_brief: str, relevan
     """Background coroutine that awaits Mahaguru and updates the job manager."""
     try:
         full_context = context_assembler.assemble_refinement_context(
-            refinement_brief, 
+            refinement_brief,
             relevant_files
         )
         response = await mahaguru_client.get_refinement(
-            refinement_brief, 
+            refinement_brief,
             code_context=full_context
         )
-        
+
         output = (
             "--- MAHAGURU REFINEMENT RESPONSE ---\n\n"
             f"{response}\n\n"
@@ -184,7 +186,7 @@ async def request_async_mahaguru_refinement(
     Returns a Job ID immediately so the agent can continue other work.
     """
     job_id = planning_job_manager.create_job(refinement_brief)
-    
+
     # Fire-and-forget the background task
     asyncio.create_task(
         _run_background_refinement(job_id, refinement_brief, relevant_files)
@@ -202,21 +204,43 @@ def get_planning_job_result(job_id: str) -> str:
     If completed, this will return the plan and clear the job from memory.
     """
     job = planning_job_manager.check_status(job_id)
-    
+
     if not job:
         return f"Error: Job ID '{job_id}' not found. It may have already been retrieved or never existed."
-    
+
     if job["status"] == "Running":
         return f"Job '{job_id}' is still Running. Mahaguru is currently thinking. Please check back later."
-    
+
     # If Completed or Failed, pop it to clean up memory
     job_data = planning_job_manager.pop_job(job_id)
-    
+
     if job_data["status"] == "Failed":
         return f"Job '{job_id}' Failed.\nDetails: {job_data['result']}"
-    
+
     # Success
     return job_data["result"]
+
+def get_project_chat_context(project_name: str) -> str:
+    """Retrieve the last session's chat context/summary for a specific project."""
+    context = chat_context_manager.get_context(project_name)
+    if context:
+        return f"Previous context found for '{project_name}':\n\n{context}"
+    return f"No previous context found for '{project_name}'. This is a fresh start."
+
+def save_project_chat_context(project_name: str, summary: str) -> str:
+    """
+    Save a summary of the current session for a project. 
+    CRITICAL: The 'summary' string MUST be formatted exactly with these 4 bullet points:
+    - Objective: [...]
+    - Completed: [...]
+    - Pending/Blockers: [...]
+    - Next Steps: [...]
+    """
+    if not summary or len(summary.strip()) < 20:
+        return "Error: Summary is too short. Please provide a detailed 4-bullet summary (min 20 chars)."
+
+    chat_context_manager.save_context(project_name, summary)
+    return f"Successfully saved chat context for '{project_name}'."
 
 # --- Registration ---
 
@@ -231,3 +255,5 @@ def register_mcp_tools(mcp: FastMCP):
     mcp.tool()(request_mahaguru_refinement)
     mcp.tool()(request_async_mahaguru_refinement)
     mcp.tool()(get_planning_job_result)
+    mcp.tool()(get_project_chat_context)
+    mcp.tool()(save_project_chat_context)

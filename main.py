@@ -7,12 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
 
-from config import config
-from core.logger import setup_logging
-from core.dependencies import get_indexer, shutdown_dependencies
-from core.utils import run_background_indexing
-from api.mcp_tools import register_mcp_tools
 from api.fastapi_routes import router as api_router
+from api.mcp_tools import register_mcp_tools
+from config import config
+from core.dependencies import get_indexer, shutdown_dependencies
+from core.logger import setup_logging
+from core.utils import run_background_indexing
 
 # 1. Transport-agnostic diagnostic setup
 _MCP_MODE = "--mcp" in sys.argv
@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     """Manage service lifecycles (Pillar III)."""
     # Initialize Core Service
     indexer = get_indexer()
-    
+
     # Auto-index on startup if configured (PRD §6.2)
     if config.PROJECT_FOLDER_TO_INDEX:
         loop = asyncio.get_event_loop()

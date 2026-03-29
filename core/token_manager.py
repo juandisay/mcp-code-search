@@ -1,5 +1,6 @@
-import tiktoken
 import logging
+
+import tiktoken
 
 logger = logging.getLogger(__name__)
 

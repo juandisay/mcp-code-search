@@ -1,4 +1,3 @@
-import pytest
 
 def test_maintenance_prune_logic_placeholder():
     """

@@ -1,10 +1,11 @@
 """Tests for MCP tools defined in main.py."""
 import pytest
+
 from api.mcp_tools import (
-    semantic_code_search,
+    get_index_stats,
     index_folder,
     list_indexed_projects,
-    get_index_stats,
+    semantic_code_search,
 )
 
 
@@ -65,8 +66,9 @@ class TestMCPIntegration:
         Verify that the registered MCP tool returns a string and not None.
         This tests the integration between the function and the FastMCP framework.
         """
+        from unittest.mock import MagicMock, patch
+
         from main import mcp
-        from unittest.mock import patch, MagicMock
 
         # 1. Mock the backend searcher to simulate findings
         mock_searcher = MagicMock()
@@ -84,7 +86,7 @@ class TestMCPIntegration:
             # 3. Call the tool via mcp.call_tool (the official way to invoke it)
             # FastMCP returns a tuple: (list_of_content_objects, extra_metadata_dict)
             content_list, _ = await mcp.call_tool("semantic_code_search", arguments={"query": "test query"})
-            
+
             # 4. Assert it returns a string with token usage
             assert len(content_list) > 0
             result = content_list[0].text

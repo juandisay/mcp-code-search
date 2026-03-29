@@ -1,21 +1,21 @@
 import logging
 from typing import List
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tree_sitter
-import tree_sitter_python
-import tree_sitter_javascript
-import tree_sitter_typescript
+import tree_sitter_c
+import tree_sitter_c_sharp
+import tree_sitter_cpp
+import tree_sitter_css
 import tree_sitter_go
+import tree_sitter_html
 import tree_sitter_java
+import tree_sitter_javascript
+import tree_sitter_php
+import tree_sitter_python
 import tree_sitter_ruby
 import tree_sitter_rust
-import tree_sitter_php
-import tree_sitter_c
-import tree_sitter_cpp
-import tree_sitter_c_sharp
-import tree_sitter_html
-import tree_sitter_css
+import tree_sitter_typescript
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class ASTChunker:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.extension = extension
-        
+
         self.ts_lang = EXTENSION_TO_TS_LANG.get(extension)
         if self.ts_lang:
             self.parser = tree_sitter.Parser(self.ts_lang)
@@ -100,18 +100,18 @@ class ASTChunker:
                 gap_text = gap_bytes.decode('utf-8', errors='replace').strip()
                 if gap_text:
                     final_chunks.extend(self.fallback_splitter.split_text(gap_text))
-            
+
             # The logical block
             chunk_bytes = text_bytes[start_byte:end_byte]
             chunk_text = chunk_bytes.decode('utf-8', errors='replace').strip()
-            
+
             if chunk_text:
                 if len(chunk_text) > self.chunk_size:
                     # Block is too large, fallback split just this block
                     final_chunks.extend(self.fallback_splitter.split_text(chunk_text))
                 else:
                     final_chunks.append(chunk_text)
-            
+
             current_byte = max(current_byte, end_byte)
 
         # Remaining bytes

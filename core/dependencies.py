@@ -1,9 +1,9 @@
-import threading
 import logging
-import sys
+import threading
+
 from config import config
 
-# Note: We don't call setup_logging here because main.py will do it 
+# Note: We don't call setup_logging here because main.py will do it
 # to ensure the correct mcp_mode is set first.
 logger = logging.getLogger(__name__)
 

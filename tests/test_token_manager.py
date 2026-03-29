@@ -1,5 +1,5 @@
-import pytest
 from core.token_manager import TokenManager
+
 
 def test_token_manager_init():
     """TokenManager initializes with default encoding."""

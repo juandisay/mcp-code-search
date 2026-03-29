@@ -1,11 +1,13 @@
-import os
 import logging
+import os
 from datetime import datetime
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
-from core.dependencies import get_indexer, get_watcher
-from core.utils import run_background_indexing
+
+from core.dependencies import get_indexer
 from core.job_manager import job_manager
+from core.utils import run_background_indexing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

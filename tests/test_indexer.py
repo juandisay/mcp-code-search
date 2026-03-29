@@ -1,4 +1,4 @@
-from core.indexer import CodeIndexer, AST_SUPPORTED_EXTENSIONS
+from core.indexer import AST_SUPPORTED_EXTENSIONS, CodeIndexer
 
 
 class TestCodeIndexer:
@@ -30,7 +30,7 @@ class TestCodeIndexer:
         """Indexing a folder with .py files works."""
         # Isolation: Use a temporary ChromaDB path for this test
         app_config.CHROMA_DATA_PATH = str(tmp_path / "chroma_db_indexer")
-        
+
         sample = tmp_path / "hello.py"
         sample.write_text(
             "def hello():\n"
@@ -47,7 +47,7 @@ class TestCodeIndexer:
         """Empty files produce zero chunks."""
         # Isolation
         app_config.CHROMA_DATA_PATH = str(tmp_path / "chroma_db_empty")
-        
+
         empty = tmp_path / "empty.py"
         empty.write_text("")
         indexer = CodeIndexer(app_config=app_config)
@@ -60,7 +60,7 @@ class TestCodeIndexer:
         """Files in excluded dirs are not indexed."""
         # Isolation
         app_config.CHROMA_DATA_PATH = str(tmp_path / "chroma_db_excluded")
-        
+
         venv_dir = tmp_path / "venv"
         venv_dir.mkdir()
         hidden = venv_dir / "hidden.py"
@@ -75,7 +75,7 @@ class TestCodeIndexer:
         """Re-indexing unchanged files is skipped."""
         # Isolation
         app_config.CHROMA_DATA_PATH = str(tmp_path / "chroma_db_cache")
-        
+
         sample = tmp_path / "stable.py"
         sample.write_text("x = 42\n")
         indexer = CodeIndexer(app_config=app_config)
@@ -89,7 +89,7 @@ class TestCodeIndexer:
         """list_projects returns project name."""
         # Isolation
         app_config.CHROMA_DATA_PATH = str(tmp_path / "chroma_db_list")
-        
+
         sample = tmp_path / "app.py"
         sample.write_text("print('hi')\n")
         indexer = CodeIndexer(app_config=app_config)

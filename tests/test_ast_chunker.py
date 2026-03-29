@@ -1,6 +1,6 @@
 """Tests for core.ast_chunker module."""
-import pytest
-from core.ast_chunker import ASTChunker, EXTENSION_TO_TS_LANG
+from core.ast_chunker import EXTENSION_TO_TS_LANG, ASTChunker
+
 
 class TestASTChunker:
     """Tests for the ASTChunker class."""
@@ -31,7 +31,7 @@ def second_function():
 '''
         chunker = ASTChunker(chunk_size=1000, chunk_overlap=0, extension=".py")
         chunks = chunker.split_text(code)
-        
+
         assert len(chunks) == 3
         assert 'def first_function():' in chunks[0]
         assert 'class MyClass:' in chunks[1]
@@ -42,10 +42,10 @@ def second_function():
         """ASTChunker splits a single large node using fallback splitter."""
         long_func_body = "    print('a')\n" * 50
         code = f"def huge_function():\n{long_func_body}"
-        
+
         chunker = ASTChunker(chunk_size=100, chunk_overlap=10, extension=".py")
         chunks = chunker.split_text(code)
-        
+
         assert len(chunks) > 1
         for chunk in chunks:
             assert len(chunk) <= 100
@@ -64,7 +64,7 @@ y = 200
 '''
         chunker = ASTChunker(chunk_size=1000, chunk_overlap=0, extension=".py")
         chunks = chunker.split_text(code)
-        
+
         assert len(chunks) == 3
         assert 'import os' in chunks[0]
         assert 'def foo():' in chunks[1]

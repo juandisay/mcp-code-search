@@ -2,6 +2,7 @@ import threading
 import uuid
 from typing import Dict, Optional
 
+
 class IndexingJobManager:
     """Thread-safe registry for tracking active indexing jobs."""
     def __init__(self):
@@ -37,15 +38,15 @@ class PlanningJobManager:
     def __init__(self):
         self._lock = threading.Lock()
         # job_id -> {"status": str, "result": Optional[str], "brief": str}
-        self._jobs: Dict[str, dict] = {} 
+        self._jobs: Dict[str, dict] = {}
 
     def create_job(self, brief: str) -> str:
         """Register a new job and return a unique Job ID."""
         job_id = f"plan_{uuid.uuid4().hex[:8]}"
         with self._lock:
             self._jobs[job_id] = {
-                "status": "Running", 
-                "result": None, 
+                "status": "Running",
+                "result": None,
                 "brief": (brief[:60] + "...") if len(brief) > 60 else brief
             }
         return job_id

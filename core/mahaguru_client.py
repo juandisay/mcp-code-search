@@ -1,6 +1,8 @@
 import logging
 import re
+
 import httpx
+
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ class MahaguruClient:
         
         Tries multiple models from config.MODELS in sequence if failures occur.
         """
-        
+
         if not system_prompt:
             system_prompt = (
                 "You are Mahaguru, a Senior Technical Architect and Teacher. "
@@ -41,10 +43,10 @@ class MahaguruClient:
 
         # Pre-flight context management (Pillar III)
         from core.token_manager import token_manager
-        
+
         full_prompt = f"{system_prompt or ''}\n{refinement_brief}\n{code_context or ''}"
         estimated_tokens = token_manager.count_tokens(full_prompt)
-        
+
         # If context is too large, truncate it
         if estimated_tokens > config.MAX_TOTAL_CONTEXT_TOKENS:
             logger.warning("Context too large (%d tokens). Truncating...", estimated_tokens)
@@ -64,7 +66,7 @@ class MahaguruClient:
         errors = []
         for model_name in config.MODELS:
             logger.info("Attempting Mahaguru refinement with model: %s", model_name)
-            
+
             user_content = f"Worker Refinement Brief:\n\n{refinement_brief}"
             if code_context:
                 user_content += f"\n\n--- Code Context ---\n{code_context}\n--- End of Code Context ---"
@@ -86,13 +88,13 @@ class MahaguruClient:
                     headers=headers,
                     timeout=self.timeout
                 )
-                
+
                 # Handle rate limits and server errors by switching models
                 if response.status_code == 429:
                     logger.warning("Rate limit hit for model %s. Switching...", model_name)
                     errors.append(f"{model_name}: Rate limited (429)")
                     continue
-                
+
                 if response.status_code >= 500:
                     logger.warning("Server error (%d) for model %s. Switching...", response.status_code, model_name)
                     errors.append(f"{model_name}: Server error ({response.status_code})")
@@ -100,23 +102,23 @@ class MahaguruClient:
 
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if "choices" in data and len(data["choices"]) > 0:
                     raw_content = data["choices"][0]["message"]["content"]
                     logger.info("Successfully received refinement from model: %s", model_name)
-                    
+
                     # Distillation Phase (Pillar III: Efficient context management)
                     # Support both <thinking> and <think> (DeepSeek-R1)
                     think_match = re.search(r'<(?:think|thinking)>(.*?)</(?:think|thinking)>', raw_content, flags=re.DOTALL | re.IGNORECASE)
                     if think_match:
                         thinking_process = think_match.group(1).strip()
                         logger.info("--- Mahaguru Thinking Process ---\n%s", thinking_process)
-                        
+
                         # Strip thinking from the plan to keep the Worker focused
                         final_plan = re.sub(r'<(?:think|thinking)>.*?</(?:think|thinking)>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
                     else:
                         final_plan = raw_content.strip()
-                    
+
                     return final_plan
                 else:
                     logger.error("Unexpected response format from model %s: %s", model_name, data)

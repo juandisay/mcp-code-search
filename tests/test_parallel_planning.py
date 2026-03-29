@@ -1,9 +1,10 @@
-import pytest
 import asyncio
 import re
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from api.mcp_tools import request_async_mahaguru_refinement, get_planning_job_result
+import pytest
+
+from api.mcp_tools import get_planning_job_result, request_async_mahaguru_refinement
 from core.job_manager import planning_job_manager
 
 # --- Fixtures ---
@@ -31,23 +32,23 @@ def extract_job_id(response_text: str) -> str:
 @patch("api.mcp_tools.context_assembler.assemble_refinement_context")
 async def test_request_async_mahaguru_refinement_creation(mock_assemble, mock_get_refinement):
     """Test 1: Verify job creation returns a valid ID and enters 'Running' state."""
-    
+
     # Setup mock to return immediately
     mock_get_refinement.return_value = "Mocked Plan"
-    
+
     response = await request_async_mahaguru_refinement("Test brief", ["file1.py"])
-    
+
     # Verify response format and extract ID
     assert "Background planning job initiated successfully" in response
     job_id = extract_job_id(response)
-    
+
     # Verify internal state
     job_data = planning_job_manager.check_status(job_id)
     assert job_data is not None
-    # It might be Completed already if the event loop was fast, 
+    # It might be Completed already if the event loop was fast,
     # but we primarily care that it was registered.
     assert job_data["status"] in ["Running", "Completed"]
-    
+
     # Allow background task to flush to avoid asyncio warnings
     await asyncio.sleep(0.01)
 
@@ -89,7 +90,7 @@ async def test_get_planning_job_result_lifecycle(mock_assemble, mock_get_refinem
     popped_result = get_planning_job_result(job_id)
     assert "Error: Job ID" in popped_result
     assert "not found" in popped_result
-    
+
     # Ensure internal registry is empty
     assert planning_job_manager.check_status(job_id) is None
 
@@ -98,7 +99,7 @@ async def test_get_planning_job_result_lifecycle(mock_assemble, mock_get_refinem
 @patch("api.mcp_tools.context_assembler.assemble_refinement_context")
 async def test_get_planning_job_result_failed(mock_assemble, mock_get_refinement):
     """Test 3: Verify graceful handling of background task exceptions."""
-    
+
     async def failing_mock(*args, **kwargs):
         raise ValueError("Simulated API Timeout")
 
@@ -112,10 +113,10 @@ async def test_get_planning_job_result_failed(mock_assemble, mock_get_refinement
 
     # Retrieve result
     failed_result = get_planning_job_result(job_id)
-    
+
     assert "Failed" in failed_result
     assert "Simulated API Timeout" in failed_result
-    
+
     # Verify it was popped after failure retrieval
     assert planning_job_manager.check_status(job_id) is None
 
@@ -129,7 +130,7 @@ def test_edge_case_invalid_job_id():
 @patch("api.mcp_tools.context_assembler.assemble_refinement_context")
 async def test_edge_case_concurrent_job_creation(mock_assemble, mock_get_refinement):
     """Test 5: Verify thread-safe creation of multiple concurrent jobs."""
-    
+
     # Pause all tasks so they stay in 'Running' state
     release_event = asyncio.Event()
     async def controlled_mock(*args, **kwargs):
@@ -139,7 +140,7 @@ async def test_edge_case_concurrent_job_creation(mock_assemble, mock_get_refinem
 
     # Create 10 jobs concurrently
     tasks = [
-        request_async_mahaguru_refinement(f"Concurrent brief {i}") 
+        request_async_mahaguru_refinement(f"Concurrent brief {i}")
         for i in range(10)
     ]
     responses = await asyncio.gather(*tasks)

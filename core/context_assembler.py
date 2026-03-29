@@ -1,7 +1,8 @@
-import os
 import logging
+import os
+
 from config import config
-from core.dependencies import get_searcher, get_indexer
+from core.dependencies import get_indexer, get_searcher
 from core.token_manager import token_manager
 
 logger = logging.getLogger(__name__)
@@ -13,12 +14,12 @@ class ContextAssembler:
     def is_path_safe(file_path: str) -> bool:
         """Dynamic security check to ensure path is within an indexed project root."""
         abs_path = os.path.abspath(file_path)
-        
+
         # 1. Static Allowed Roots (Sandboxing)
         allowed_roots = [os.path.abspath(r) for r in config.ALLOWED_CONTEXT_ROOTS]
         if any(abs_path.startswith(root) for root in allowed_roots):
             return True
-            
+
         # 2. Dynamic Indexed Roots (Project-based)
         try:
             indexer = get_indexer()
@@ -27,7 +28,7 @@ class ContextAssembler:
                 return True
         except Exception as e:
             logger.error("Error during dynamic path validation: %s", e)
-            
+
         return False
 
     @staticmethod
@@ -36,8 +37,8 @@ class ContextAssembler:
         try:
             with open(file_path, "rb") as f:
                 content_bytes = f.read(max_bytes)
-                content = content_bytes.decode("utf-8", errors="replace")
-                
+                content = content_bytes.decode("utf-8", errors="strict")
+
                 if f.peek(1): # Still more data
                     content += "\n\n[... File truncated due to size limit ...]"
                 return content

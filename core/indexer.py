@@ -1,25 +1,25 @@
-import os
-import json
+import concurrent.futures
 import hashlib
 import logging
+import os
+import queue
+import sqlite3
 import threading
-import concurrent.futures
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import chromadb
 from chromadb.utils import embedding_functions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import sqlite3
-import queue
-if TYPE_CHECKING:
-    from config import AppConfig
 
+if TYPE_CHECKING:
+    pass
+
+from core.ast_chunker import EXTENSION_TO_TS_LANG, ASTChunker
+from core.db_utils import get_collection_name  # Add this
+from core.models import ProcessedChunkBatch
 from core.token_manager import token_manager
-from core.ast_chunker import ASTChunker, EXTENSION_TO_TS_LANG
-from core.models import IndexingTask, ProcessedChunkBatch
-from core.db_utils import get_collection_name # Add this
 
 logger = logging.getLogger(__name__)
 
@@ -74,15 +74,15 @@ class CodeIndexer:
             path=self.config.CHROMA_DATA_PATH,
             settings=Settings(anonymized_telemetry=False)
         )
-        
+
         # Dependency Injection for Embedding Function
         self.embedding_fn = (
             embedding_fn or embedding_functions.DefaultEmbeddingFunction()
         )
-        
+
         # Unified Collection Naming
         coll_name = get_collection_name(self.embedding_fn)
-        
+
         self.collection = (
             self.chroma_client.get_or_create_collection(
                 name=coll_name,
@@ -111,10 +111,10 @@ class CodeIndexer:
 
         # State Storage Database (SQLite)
         self.state_db_path = Path(self.config.CHROMA_DATA_PATH) / self.config.STATE_DB_NAME
-        
+
         # This connection is ONLY for the consumer thread (Pillar I)
         self._writer_db_conn = sqlite3.connect(
-            self.state_db_path, 
+            self.state_db_path,
             check_same_thread=False,
             timeout=30.0
         )
@@ -176,7 +176,7 @@ class CodeIndexer:
                 if batch is None:  # Sentinel to stop
                     self.work_queue.task_done()
                     break
-                
+
                 # 2. Batch write to ChromaDB
                 try:
                     # ChromaDB writes still need serialization if shared
@@ -196,7 +196,7 @@ class CodeIndexer:
 
             except Exception as e:
                 logger.error("Unexpected error in Indexer Consumer loop: %s", e)
-        
+
         logger.info("Indexer Consumer thread stopped.")
 
     def _start_consumer(self):
@@ -324,13 +324,13 @@ class CodeIndexer:
         # Process changed/new files in parallel (Producers)
         max_workers = self.config.INDEXING_MAX_WORKERS
         logger.info("Indexing %d files using %d workers", len(to_index), max_workers)
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
-                executor.submit(self._process_file_worker, fp, stats, project_name): fp 
+                executor.submit(self._process_file_worker, fp, stats, project_name): fp
                 for fp, stats in to_index
             }
-            
+
             for future in concurrent.futures.as_completed(future_to_file):
                 fp = future_to_file[future]
                 try:
@@ -372,7 +372,7 @@ class CodeIndexer:
         prepared_ids = []
         prepared_metas = []
         prepared_docs = []
-        
+
         current_char_idx = 0
         total_tokens_file = 0
 
@@ -380,9 +380,9 @@ class CodeIndexer:
             start_idx = content.find(chunk, current_char_idx)
             if start_idx == -1:
                 start_idx = current_char_idx
-            
+
             start_line = content.count("\n", 0, start_idx) + 1
-            
+
             prepared_metas.append({
                 "file_path": file_path,
                 "extension": ext,
@@ -399,7 +399,7 @@ class CodeIndexer:
         # 3. Generate Embeddings (Heavy I/O/CPU) outside the Consumer
         try:
             embeddings = self.embedding_fn(prepared_docs)
-            
+
             # 4. Push to Consumer Queue
             batch = ProcessedChunkBatch(
                 file_path=file_path,
@@ -426,7 +426,7 @@ class CodeIndexer:
         """Remove a file from the index (Thread-Safe)."""
         file_path = os.path.abspath(file_path)
         logger.info("Deleting file from index: %s", file_path)
-        
+
         # Remove from vector DB and SQLite state
         with self._db_lock:
             self._delete_file_no_lock(file_path)
@@ -435,7 +435,7 @@ class CodeIndexer:
     def update_file(self, file_path: str, project_name: str) -> dict:
         """Update/Re-index a single file (Thread-Safe). Guard against non-existent paths."""
         file_path = os.path.abspath(file_path)
-        
+
         if not os.path.exists(file_path):
             logger.warning("update_file called on non-existent path: %s. Removing from index.", file_path)
             self.delete_file(file_path)
@@ -445,10 +445,10 @@ class CodeIndexer:
         with self._db_lock:
              self._delete_file_no_lock(file_path)
              # State will be upserted in process_file_worker
-             
+
         stats = _get_file_stats(file_path)
         chunks, tokens = self._process_file_worker(file_path, stats, project_name)
-        
+
         return {"chunks_upserted": chunks, "total_tokens": tokens}
 
     def list_projects(self) -> List[str]:
@@ -481,7 +481,7 @@ class CodeIndexer:
     def delete_project(self, project_name: str) -> dict:
         """Remove all chunks and related data for a specific project."""
         logger.info("Deleting project: %s", project_name)
-        
+
         with self._db_lock:
             results = self.collection.get(
                 where={"project_name": project_name},
@@ -505,5 +505,5 @@ class CodeIndexer:
 
             for fp in file_paths:
                 self._delete_file_state(self._writer_db_conn, fp)
-        
+
         return {"deleted_chunks": len(ids_to_delete), "deleted_files": len(file_paths)}

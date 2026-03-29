@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import field_validator, SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 # Project root directory (where this file lives)
