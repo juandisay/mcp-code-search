@@ -445,9 +445,16 @@ class CodeIndexer:
 
         ext = Path(file_path).suffix
         splitter = self._get_splitter(ext)
-        chunks = splitter.split_text(content)
 
-        if not chunks:
+        # Use AST-enhanced splitting if available
+        if hasattr(splitter, "split_with_metadata"):
+            chunks_data = splitter.split_with_metadata(content)
+        else:
+            # Fallback to generic splitting
+            chunks = splitter.split_text(content)
+            chunks_data = [{"text": c, "metadata": {}} for c in chunks]
+
+        if not chunks_data:
             return 0, 0
 
         prepared_ids = []
@@ -457,20 +464,31 @@ class CodeIndexer:
         current_char_idx = 0
         total_tokens_file = 0
 
-        for i, chunk in enumerate(chunks):
+        for i, chunk_item in enumerate(chunks_data):
+            chunk = chunk_item["text"]
+            ast_meta = chunk_item.get("metadata", {})
+
             start_idx = content.find(chunk, current_char_idx)
             if start_idx == -1:
                 start_idx = current_char_idx
 
             start_line = content.count("\n", 0, start_idx) + 1
 
-            prepared_metas.append({
+            meta = {
                 "file_path": file_path,
                 "extension": ext,
                 "start_line": start_line,
                 "project_name": project_name,
                 "model": getattr(self.collection, "name", "unknown")
-            })
+            }
+            # Merge AST-enhanced metadata (imports, class hierarchy)
+            if ast_meta.get("imports"):
+                meta["imports"] = ast_meta["imports"]
+            if ast_meta.get("class_hierarchy"):
+                # Chroma metadata doesn't support lists, so we join it
+                meta["class_hierarchy"] = " > ".join(ast_meta["class_hierarchy"])
+
+            prepared_metas.append(meta)
             prepared_ids.append(f"{file_path}_chunk_{i}")
             prepared_docs.append(chunk)
             total_tokens_file += token_manager.count_tokens(chunk)
@@ -574,17 +592,73 @@ class CodeIndexer:
 
             ids_to_delete = results["ids"]
             metadatas = results["metadatas"]
-            file_paths = {m["file_path"] for m in metadatas if m and m.get("file_path")}
+            file_paths = list({m["file_path"] for m in metadatas if m and m.get("file_path")})
 
+            # Batch delete chunks from vector DB
             for i in range(0, len(ids_to_delete), 10000):
                 self.collection.delete(ids=ids_to_delete[i:i+10000])
 
-            # Remove from project_roots if we can identify the folder
-            # For simplicity, we keep project_roots entries unless someone manually purges,
-            # or we could try matching folder_path by identifying all remaining and finding min prefix.
-            # However, file_paths cleanup takes care of file-level state.
-
-            for fp in file_paths:
-                self._delete_file_state(self._writer_db_conn, fp)
+            # Batch remove from SQLite state
+            self._batch_delete_file_state(self._writer_db_conn, file_paths)
 
         return {"deleted_chunks": len(ids_to_delete), "deleted_files": len(file_paths)}
+
+    def _batch_delete_file_state(self, conn: sqlite3.Connection, file_paths: List[str]):
+        """Remove multiple files from the state DB in batches (optimized)."""
+        if not file_paths:
+            return
+            
+        batch_size = 500
+        for i in range(0, len(file_paths), batch_size):
+            batch = file_paths[i:i+batch_size]
+            placeholders = ",".join(["?"] * len(batch))
+            conn.execute(f"DELETE FROM file_state WHERE file_path IN ({placeholders})", batch)
+            conn.execute(f"DELETE FROM chunk_content WHERE file_path IN ({placeholders})", batch)
+            conn.commit()
+
+    def _delete_project_root(self, conn: sqlite3.Connection, folder_path: str):
+        """Remove a project root from the state DB."""
+        conn.execute("DELETE FROM project_roots WHERE folder_path = ?", (folder_path,))
+        conn.commit()
+
+    def prune_stale_files(self) -> dict:
+        """Scan index for files and roots that no longer exist on disk and remove them (optimized)."""
+        logger.info("Starting maintenance: pruning stale files and roots.")
+
+        # 1. Prune Stale Files
+        all_stats = self._get_all_file_stats()
+        stale_file_paths = []
+        for file_path in all_stats.keys():
+            if not os.path.exists(file_path):
+                stale_file_paths.append(file_path)
+
+        if stale_file_paths:
+            logger.info("Pruning %d non-existent files.", len(stale_file_paths))
+            with self._db_lock:
+                # 1.1 Delete from Vector DB (Chroma)
+                # Chroma doesn't have a direct 'where file_path IN [...]', so we use metadata filter
+                # or just delete file by file if the batch is small, but for production, 
+                # we query IDs first then delete.
+                for i in range(0, len(stale_file_paths), 100):
+                    batch = stale_file_paths[i:i+100]
+                    results = self.collection.get(where={"file_path": {"$in": batch}}, include=[])
+                    if results and results.get("ids"):
+                        self.collection.delete(ids=results["ids"])
+                
+                # 1.2 Delete from SQLite state
+                self._batch_delete_file_state(self._writer_db_conn, stale_file_paths)
+
+        # 2. Prune Stale Project Roots
+        indexed_roots = self.get_indexed_roots()
+        pruned_roots = 0
+        with self._db_lock:
+            for root in indexed_roots:
+                if not os.path.exists(root):
+                    logger.info("Pruning non-existent project root: %s", root)
+                    self._delete_project_root(self._writer_db_conn, root)
+                    pruned_roots += 1
+
+        return {
+            "pruned_files": len(stale_file_paths),
+            "pruned_roots": pruned_roots
+        }

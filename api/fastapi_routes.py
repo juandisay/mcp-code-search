@@ -48,6 +48,20 @@ def api_index_folder(request: IndexRequest, background_tasks: BackgroundTasks):
         "detail": "Indexing started in the background."
     }
 
+@router.post("/maintenance/prune")
+def api_maintenance_prune():
+    """Run maintenance to remove stale files/roots."""
+    try:
+        indexer = get_indexer()
+        summary = indexer.prune_stale_files()
+        return {
+            "status": "success",
+            "pruned_files": summary["pruned_files"],
+            "pruned_roots": summary["pruned_roots"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/health")
 def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}

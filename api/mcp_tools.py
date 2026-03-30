@@ -77,6 +77,18 @@ def delete_project(project_name: str) -> str:
     except Exception as e:
         return f"Error deleting project: {e}"
 
+def maintenance_prune() -> str:
+    """Scan and remove stale files/projects from the index that no longer exist on disk."""
+    try:
+        summary = get_indexer().prune_stale_files()
+        return (
+            f"Maintenance Complete:\n"
+            f"  - Stale files removed: {summary['pruned_files']}\n"
+            f"  - Non-existent project roots removed: {summary['pruned_roots']}"
+        )
+    except Exception as e:
+        return f"Error during maintenance: {e}"
+
 def get_index_stats() -> str:
     """Get code search index statistics and active background jobs."""
     indexer = get_indexer()
@@ -255,6 +267,7 @@ def register_mcp_tools(mcp: FastMCP):
     mcp.tool()(index_folder)
     mcp.tool()(list_indexed_projects)
     mcp.tool()(delete_project)
+    mcp.tool()(maintenance_prune)
     mcp.tool()(get_index_stats)
     mcp.tool()(sync_agent_rules)
     mcp.tool()(request_mahaguru_refinement)
