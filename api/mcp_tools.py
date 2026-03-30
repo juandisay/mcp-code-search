@@ -91,33 +91,52 @@ def maintenance_prune() -> str:
 
 def get_index_stats() -> str:
     """Get code search index statistics and active background jobs."""
-    indexer = get_indexer()
-    collection = indexer.collection
-    count = collection.count()
-    projects = indexer.list_projects()
-    proj_str = ", ".join(projects) if projects else "none"
+    try:
+        indexer = get_indexer()
+        collection = indexer.collection
+        count = collection.count()
+        projects = indexer.list_projects()
+        proj_str = ", ".join(projects) if projects else "none"
 
-    # Active Background Jobs status feedback
-    active_idx_jobs = job_manager.get_active_jobs()
-    idx_str = "None"
-    if active_idx_jobs:
-        idx_str = "\n".join([f"  - {path}: {status}" for path, status in active_idx_jobs.items()])
+        # Active Background Jobs status feedback
+        active_idx_jobs = job_manager.get_active_jobs()
+        idx_str = "None"
+        if active_idx_jobs:
+            idx_str = "\n".join([f"  - {path}: {status}" for path, status in active_idx_jobs.items()])
 
-    # Active Background Planning Jobs
-    active_plan_jobs = planning_job_manager.get_active_jobs()
-    plan_str = "None"
-    if active_plan_jobs:
-        plan_str = "\n".join([f"  - {jid}: {brief}" for jid, brief in active_plan_jobs.items()])
+        # Active Background Planning Jobs
+        active_plan_jobs = planning_job_manager.get_active_jobs()
+        plan_str = "None"
+        if active_plan_jobs:
+            plan_str = "\n".join([f"  - {jid}: {brief}" for jid, brief in active_plan_jobs.items()])
 
-    return (
-        f"--- Index Statistics ---\n"
-        f"Total indexed chunks: {count}\n"
-        f"Projects ({len(projects)}): {proj_str}\n\n"
-        f"--- Active Indexing Jobs ---\n"
-        f"{idx_str}\n\n"
-        f"--- Active Planning Jobs ---\n"
-        f"{plan_str}"
-    )
+        return (
+            f"--- Index Statistics ---\n"
+            f"Total indexed chunks: {count}\n"
+            f"Projects ({len(projects)}): {proj_str}\n\n"
+            f"--- Active Indexing Jobs ---\n"
+            f"{idx_str}\n\n"
+            f"--- Active Planning Jobs ---\n"
+            f"{plan_str}"
+        )
+    except Exception as e:
+        logger.error("Error fetching index stats: %s", e)
+        return (
+            "ERROR: The index database appears to be corrupted or has missing tables (e.g. 'no such table: collections').\n"
+            f"Details: {e}\n\n"
+            "SUGGESTION: Please run the 'rebuild_index_database' tool to restore system stability. "
+            "This will perform a clean wipe and re-initialization."
+        )
+
+def rebuild_index_database() -> str:
+    """Manually trigger a full database wipe and re-initialization (Factory Reset)."""
+    logger.warning("MCP Tool: rebuild_index_database triggered.")
+    try:
+        indexer = get_indexer()
+        return indexer.rebuild_database()
+    except Exception as e:
+        logger.error("Error during rebuild tool execution: %s", e)
+        return f"CRITICAL ERROR: Failed to rebuild database: {e}"
 
 def sync_agent_rules(folder_path: str, context_notes: str = "") -> str:
     """Init or update Antigravity agent rules based on its detected stack."""
@@ -269,6 +288,7 @@ def register_mcp_tools(mcp: FastMCP):
     mcp.tool()(delete_project)
     mcp.tool()(maintenance_prune)
     mcp.tool()(get_index_stats)
+    mcp.tool()(rebuild_index_database)
     mcp.tool()(sync_agent_rules)
     mcp.tool()(request_mahaguru_refinement)
     mcp.tool()(request_async_mahaguru_refinement)

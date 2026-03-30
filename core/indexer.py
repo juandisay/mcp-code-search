@@ -2,6 +2,7 @@ import concurrent.futures
 import hashlib
 import logging
 import os
+import shutil
 import queue
 import sqlite3
 import threading
@@ -69,26 +70,14 @@ class CodeIndexer:
             embedding_fn: Optional custom embedding function.
         """
         self.config = app_config
-        from chromadb.config import Settings
-        self.chroma_client = chromadb.PersistentClient(
-            path=self.config.CHROMA_DATA_PATH,
-            settings=Settings(anonymized_telemetry=False)
-        )
 
         # Dependency Injection for Embedding Function
         self.embedding_fn = (
             embedding_fn or embedding_functions.DefaultEmbeddingFunction()
         )
 
-        # Unified Collection Naming
-        coll_name = get_collection_name(self.embedding_fn)
-
-        self.collection = (
-            self.chroma_client.get_or_create_collection(
-                name=coll_name,
-                embedding_function=self.embedding_fn,
-            )
-        )
+        # Initialize ChromaDB with recovery logic (Mahaguru Pattern)
+        self._init_chromadb_with_recovery()
 
         self.chunk_size = self.config.CHUNK_SIZE
         self.chunk_overlap = self.config.CHUNK_OVERLAP
@@ -124,6 +113,52 @@ class CodeIndexer:
         self.work_queue = queue.Queue(maxsize=100)
         self._consumer_thread = None
         self._start_consumer()
+
+    def _init_chromadb_with_recovery(self):
+        """Initialize ChromaDB with a fallback to wipe the data directory if it's corrupted."""
+        os.makedirs(self.config.CHROMA_DATA_PATH, exist_ok=True)
+        from chromadb.config import Settings
+        
+        try:
+            self.chroma_client = chromadb.PersistentClient(
+                path=self.config.CHROMA_DATA_PATH,
+                settings=Settings(anonymized_telemetry=False)
+            )
+            coll_name = get_collection_name(self.embedding_fn)
+            self.collection = self.chroma_client.get_or_create_collection(
+                name=coll_name,
+                embedding_function=self.embedding_fn,
+            )
+            # Perform a small connectivity check
+            self.collection.count()
+            logger.info("ChromaDB initialized successfully.")
+        except Exception as e:
+            logger.error("ChromaDB corruption or initialization fault detected: %s", e)
+            logger.warning("Attempting automatic rebuild of the database environment...")
+            
+            # Close existing connection if any
+            self.chroma_client = None
+            
+            # WIPE the directory (Safest recovery for derived data)
+            if os.path.exists(self.config.CHROMA_DATA_PATH):
+                try:
+                    shutil.rmtree(self.config.CHROMA_DATA_PATH, ignore_errors=True)
+                except Exception as wipe_err:
+                    logger.error("Failed to wipe data directory: %s", wipe_err)
+            
+            os.makedirs(self.config.CHROMA_DATA_PATH, exist_ok=True)
+            
+            # RETRY
+            self.chroma_client = chromadb.PersistentClient(
+                path=self.config.CHROMA_DATA_PATH,
+                settings=Settings(anonymized_telemetry=False)
+            )
+            coll_name = get_collection_name(self.embedding_fn)
+            self.collection = self.chroma_client.get_or_create_collection(
+                name=coll_name,
+                embedding_function=self.embedding_fn,
+            )
+            logger.info("ChromaDB environment successfully rebuilt and initialized.")
 
     def _init_state_db(self, conn: sqlite3.Connection):
         """Initialize the SQLite state database for file tracking using provided connection."""
@@ -291,6 +326,53 @@ class CodeIndexer:
             self.work_queue.put(None)
             self.work_queue.join()
             self._consumer_thread = None
+    def rebuild_database(self) -> str:
+        """Manually trigger a full database wipe and re-initialization (Factory Reset)."""
+        logger.warning("Manual database rebuild (Factory Reset) triggered.")
+        
+        # 1. Shutdown consumer gracefully OUTSIDE the lock to prevent deadlock (Mahaguru Refinement)
+        try:
+            self._stop_consumer()
+        except Exception as e:
+            logger.error("Error during consumer shutdown for rebuild: %s", e)
+
+        with self._db_lock:
+            # 2. Close SQLite connection
+            try:
+                if self._writer_db_conn:
+                    self._writer_db_conn.close()
+                    self._writer_db_conn = None
+            except Exception as e:
+                logger.error("Error closing SQLite connection: %s", e)
+
+            # 3. Re-run initialization with recovery logic
+            if os.path.exists(self.config.CHROMA_DATA_PATH):
+                shutil.rmtree(self.config.CHROMA_DATA_PATH, ignore_errors=True)
+            
+            self._init_chromadb_with_recovery()
+            
+            # 4. Re-read paths and init SQLite
+            self.state_db_path = Path(self.config.CHROMA_DATA_PATH) / self.config.STATE_DB_NAME
+            self._writer_db_conn = sqlite3.connect(
+                self.state_db_path,
+                check_same_thread=False,
+                timeout=30.0
+            )
+            self._init_state_db(self._writer_db_conn)
+            
+            # 5. Clear any residual items from active producers before restart (Mahaguru Refinement)
+            while not self.work_queue.empty():
+                try:
+                    self.work_queue.get_nowait()
+                    self.work_queue.task_done()
+                except queue.Empty:
+                    break
+            
+            # 6. Restart consumer
+            self._start_consumer()
+            
+        logger.info("Database rebuild complete.")
+        return "SUCCESS: Code-Search database has been completely rebuilt from scratch."
 
     def _delete_file_state(self, conn: sqlite3.Connection, file_path: str):
         """Remove a file from the state DB and chunk content (Pillar I/Priority 1)."""
