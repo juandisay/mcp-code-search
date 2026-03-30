@@ -110,7 +110,7 @@ class ASTChunker:
             for child in node.children:
                 find_imports(child)
         find_imports(tree.root_node)
-        
+
         # Deduplicate and limit imports to avoid metadata bloat
         unique_imports = sorted(list(set(file_imports)))
         imports_str = "\n".join(unique_imports)
@@ -119,7 +119,7 @@ class ASTChunker:
 
         # 2. Collect logical blocks
         nodes_collected = []
-        
+
         def get_hierarchy(node):
             if not node:
                 return []
@@ -135,7 +135,7 @@ class ASTChunker:
                             if child.type in ['identifier', 'type_identifier']:
                                 name_node = child
                                 break
-                    
+
                     if name_node:
                         name = text_bytes[name_node.start_byte:name_node.end_byte].decode('utf-8', errors='replace')
                         hierarchy.append(name)
@@ -144,7 +144,7 @@ class ASTChunker:
 
         def collect_nodes(node):
             node_type = node.type.lower()
-            
+
             # If it's a function/method/interface member, collect it
             is_func = any(kw in node_type for kw in ['function', 'method'])
             is_other = any(kw in node_type for kw in ['struct', 'interface']) and not any(kw in node_type for kw in ['class'])
@@ -155,7 +155,7 @@ class ASTChunker:
                     "class_hierarchy": get_hierarchy(node)
                 })
                 return # Don't go deeper into functions
-            
+
             # If it's a class, we traverse its children to find methods
             if any(kw in node_type for kw in ['class']):
                 for child in node.children:
@@ -186,7 +186,7 @@ class ASTChunker:
                         gap_hierarchy = get_hierarchy(gap_node)
                     except Exception:
                         gap_hierarchy = []
-                        
+
                     for c in self.fallback_splitter.split_text(gap_text):
                         final_chunks.append({"text": c, "metadata": {"imports": imports_str, "class_hierarchy": gap_hierarchy}})
 

@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+# Disable ChromaDB telemetry as early as possible to prevent background threads
+os.environ['CHROMA_TELEMETRY_DISABLED'] = '1'
+
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 

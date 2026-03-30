@@ -73,7 +73,7 @@ class CodeSearcher:
 
         self.max_distance = self.config.MAX_DISTANCE
         self._cross_encoder = None
-        
+
         # Priority 1: Hybrid Search (FTS5)
         self.state_db_path = Path(self.config.CHROMA_DATA_PATH) / self.config.STATE_DB_NAME
 
@@ -81,6 +81,12 @@ class CodeSearcher:
         """Get a read-only SQLite connection for FTS5 queries."""
         db_uri = f"file:{self.state_db_path}?mode=ro"
         return sqlite3.connect(db_uri, uri=True)
+
+    def shutdown(self):
+        """Release ChromaDB and SQLite resources (Pillar III HARDENING)."""
+        logger.info("Closing CodeSearcher connections...")
+        self.collection = None
+        self.chroma_client = None
 
     def _fts5_search(
         self,
@@ -92,18 +98,18 @@ class CodeSearcher:
         try:
             with self._get_db_conn() as conn:
                 conn.row_factory = sqlite3.Row
-                
+
                 # Sanitize query for FTS5 (basic escaping)
                 # FTS5 doesn't like some characters unless quoted
                 safe_query = query.replace('"', '""')
-                
+
                 sql = """
                     SELECT chunk_id, file_path, project_name, content, rank
                     FROM chunk_fts
                     WHERE chunk_fts MATCH ?
                 """
                 params = [f'"{safe_query}"']
-                
+
                 if project_name:
                     if isinstance(project_name, list):
                         placeholders = ",".join(["?"] * len(project_name))
@@ -112,10 +118,10 @@ class CodeSearcher:
                     else:
                         sql += " AND project_name = ?"
                         params.append(project_name)
-                
+
                 sql += " ORDER BY rank LIMIT ?"
                 params.append(n_results * 2) # Get more candidates for RRF
-                
+
                 cursor = conn.execute(sql, params)
                 results = []
                 for row in cursor.fetchall():
@@ -141,7 +147,7 @@ class CodeSearcher:
         scores: Dict[str, float] = {}
         # Keep track of metadata for the winner chunks
         metadata_map: Dict[str, Dict[str, Any]] = {}
-        
+
         # Process Vector results
         for i, res in enumerate(vector_results):
             # In Chroma, ids are file_path_chunk_i
@@ -153,7 +159,7 @@ class CodeSearcher:
                 "meta": res["meta"],
                 "distance": res.get("distance")
             }
-            
+
         # Process FTS results
         for i, res in enumerate(fts_results):
             cid = res["chunk_id"]
@@ -168,15 +174,15 @@ class CodeSearcher:
                     },
                     "distance": None # FTS doesn't have vector distance
                 }
-                
+
         # Sort by RRF score descending
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-        
+
         final_results = []
         for cid in sorted_ids:
             item = metadata_map[cid]
             final_results.append(item)
-            
+
         return final_results
 
     @property
@@ -272,7 +278,7 @@ class CodeSearcher:
                 where=where_clause,
                 include=["documents", "metadatas", "distances"]
             )
-            
+
             # 2. FTS5 Search (if hybrid enabled)
             fts_future = None
             if should_use_hybrid:
@@ -282,14 +288,14 @@ class CodeSearcher:
                     n_results=initial_k,
                     project_name=project_name
                 )
-            
+
             # Wait for results
             try:
                 results = vector_future.result()
             except Exception as e:
                 logger.error("Vector search failed: %s", e)
                 results = None
-                
+
             fts_results = []
             if fts_future:
                 try:
@@ -305,7 +311,7 @@ class CodeSearcher:
 
         docs_list = (results or {}).get("documents")
         candidates: List[Dict[str, Any]] = []
-        
+
         if docs_list and docs_list[0]:
             docs = docs_list[0]
             metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
@@ -341,23 +347,23 @@ class CodeSearcher:
             for res in fts_results:
                 fp = res["file_path"]
                 ext = Path(fp).suffix
-                
+
                 if language:
                     langs = language if isinstance(language, list) else [language]
                     langs = [ext if ext.startswith('.') else f".{ext}" for ext in langs]
                     if ext not in langs:
                         continue
-                
+
                 if file_path_includes and file_path_includes not in fp:
                     continue
-                    
+
                 if excluded_dirs:
                     ex_dirs = excluded_dirs if isinstance(excluded_dirs, list) else [excluded_dirs]
                     if any(f"/{d.strip('/')}/" in f"/{fp.strip('/')}/" for d in ex_dirs):
                         continue
-                        
+
                 filtered_fts.append(res)
-            
+
             merged_candidates = self._rrf_merge(candidates, filtered_fts, k=self.config.RRF_K)
         else:
             merged_candidates = candidates

@@ -2,8 +2,8 @@ import concurrent.futures
 import hashlib
 import logging
 import os
-import shutil
 import queue
+import shutil
 import sqlite3
 import threading
 import time
@@ -118,7 +118,7 @@ class CodeIndexer:
         """Initialize ChromaDB with a fallback to wipe the data directory if it's corrupted."""
         os.makedirs(self.config.CHROMA_DATA_PATH, exist_ok=True)
         from chromadb.config import Settings
-        
+
         try:
             self.chroma_client = chromadb.PersistentClient(
                 path=self.config.CHROMA_DATA_PATH,
@@ -131,23 +131,37 @@ class CodeIndexer:
             )
             # Perform a small connectivity check
             self.collection.count()
+
+            # SCHEMA GUARANTEE (Mahaguru Pattern)
+            # Force ChromaDB to create internal SQLite tables (e.g. 'embeddings') immediately
+            try:
+                self.collection.add(
+                    ids=["__init_check__"],
+                    documents=["init"],
+                    metadatas=[{"type": "init"}]
+                )
+                self.collection.delete(ids=["__init_check__"])
+                logger.info("ChromaDB schema creation guaranteed.")
+            except Exception as schema_err:
+                logger.warning("Schema guarantee check skipped or failed: %s", schema_err)
+
             logger.info("ChromaDB initialized successfully.")
         except Exception as e:
             logger.error("ChromaDB corruption or initialization fault detected: %s", e)
             logger.warning("Attempting automatic rebuild of the database environment...")
-            
+
             # Close existing connection if any
             self.chroma_client = None
-            
+
             # WIPE the directory (Safest recovery for derived data)
             if os.path.exists(self.config.CHROMA_DATA_PATH):
                 try:
                     shutil.rmtree(self.config.CHROMA_DATA_PATH, ignore_errors=True)
                 except Exception as wipe_err:
                     logger.error("Failed to wipe data directory: %s", wipe_err)
-            
+
             os.makedirs(self.config.CHROMA_DATA_PATH, exist_ok=True)
-            
+
             # RETRY
             self.chroma_client = chromadb.PersistentClient(
                 path=self.config.CHROMA_DATA_PATH,
@@ -162,6 +176,7 @@ class CodeIndexer:
 
     def _init_state_db(self, conn: sqlite3.Connection):
         """Initialize the SQLite state database for file tracking using provided connection."""
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS file_state (
                 file_path TEXT PRIMARY KEY,
@@ -175,7 +190,7 @@ class CodeIndexer:
                 last_indexed REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
-        
+
         # Priority 1: Hybrid Search (FTS5)
         # Create FTS5 virtual table for external content
         # We index 'content' and 'file_path' for keyword search
@@ -188,12 +203,12 @@ class CodeIndexer:
                 content='' -- External content (we store it in Chroma, but keep a copy for FTS if needed, or just index it)
             )
         """)
-        
+
         # Actually, for "external content" FTS5 usually points to another table.
-        # But since Chroma holds the content, we'll store a copy in a regular SQLite table 
+        # But since Chroma holds the content, we'll store a copy in a regular SQLite table
         # to act as the 'external content' for FTS5, or just use a standard FTS5 table if space permits.
         # Given the "Senior Developer" mindset, let's use a content table for better FTS5 performance and management.
-        
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chunk_content (
                 chunk_id TEXT PRIMARY KEY,
@@ -202,7 +217,7 @@ class CodeIndexer:
                 content TEXT
             )
         """)
-        
+
         # Re-create FTS5 linked to chunk_content
         conn.execute("DROP TABLE IF EXISTS chunk_fts")
         conn.execute("""
@@ -215,7 +230,7 @@ class CodeIndexer:
                 content_rowid='rowid'
             )
         """)
-        
+
         # Triggers for automatic FTS5 synchronization
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS chunk_content_ai AFTER INSERT ON chunk_content BEGIN
@@ -233,7 +248,7 @@ class CodeIndexer:
                 INSERT INTO chunk_fts(rowid, content, file_path) VALUES (new.rowid, new.content, new.file_path);
             END
         """)
-        
+
         conn.commit()
 
     def _get_read_only_conn(self) -> sqlite3.Connection:
@@ -281,27 +296,27 @@ class CodeIndexer:
                             embeddings=batch.embeddings,
                             metadatas=batch.metadatas
                         )
-                        
+
                         # Priority 1: Hybrid Search (FTS5)
                         # Sync chunk_content for FTS5
                         # First, clear existing chunks for this file to avoid duplicates on re-index
                         self._writer_db_conn.execute("DELETE FROM chunk_content WHERE file_path = ?", (batch.file_path,))
-                        
+
                         # Prepare batch for SQLite insertion
                         # chunk_id, file_path, project_name, content
                         sqlite_batch = []
                         for i, cid in enumerate(batch.ids):
                             project_name = batch.metadatas[i].get("project_name", "unknown")
                             sqlite_batch.append((cid, batch.file_path, project_name, batch.docs[i]))
-                        
+
                         self._writer_db_conn.executemany(
                             "INSERT INTO chunk_content (chunk_id, file_path, project_name, content) VALUES (?, ?, ?, ?)",
                             sqlite_batch
                         )
-                        
+
                         # 3. Update File State only after DB success
                         self._update_file_state(self._writer_db_conn, batch.file_path, batch.stats_str)
-                        
+
                         self._writer_db_conn.commit()
                 except Exception as e:
                     logger.error("Consumer failed to write batch for %s: %s", batch.file_path, e)
@@ -314,6 +329,15 @@ class CodeIndexer:
 
         logger.info("Indexer Consumer thread stopped.")
 
+    def _wait_for_queue(self):
+        """Monitor the consumer thread while waiting for progress (Deadlock Prevention)."""
+        while self.work_queue.unfinished_tasks > 0:
+            # If the consumer died, join() would hang forever
+            if self._consumer_thread is None or not self._consumer_thread.is_alive():
+                logger.error("Consumer thread died while work remains in queue. Aborting join.")
+                break
+            time.sleep(0.1)
+
     def _start_consumer(self):
         """Start the consumer thread if not running."""
         if self._consumer_thread is None or not self._consumer_thread.is_alive():
@@ -321,58 +345,42 @@ class CodeIndexer:
             self._consumer_thread.start()
 
     def _stop_consumer(self):
-        """Stop the consumer thread by sending a sentinel."""
+        """Stop the consumer thread by sending a sentinel (Graceful Shutdown Hardening)."""
         if self._consumer_thread and self._consumer_thread.is_alive():
+            logger.debug("Sending STOP sentinel to indexer consumer...")
+            
+            # 1. Wait for existing work to complete naturally (Worker Hardening)
+            self._wait_for_queue()
+            
+            # 2. Send sentinel
             self.work_queue.put(None)
-            self.work_queue.join()
-            self._consumer_thread = None
-    def rebuild_database(self) -> str:
-        """Manually trigger a full database wipe and re-initialization (Factory Reset)."""
-        logger.warning("Manual database rebuild (Factory Reset) triggered.")
-        
-        # 1. Shutdown consumer gracefully OUTSIDE the lock to prevent deadlock (Mahaguru Refinement)
-        try:
-            self._stop_consumer()
-        except Exception as e:
-            logger.error("Error during consumer shutdown for rebuild: %s", e)
-
-        with self._db_lock:
-            # 2. Close SQLite connection
+            
+            # 3. Wait for thread to exit with timeout
             try:
-                if self._writer_db_conn:
-                    self._writer_db_conn.close()
-                    self._writer_db_conn = None
+                self._consumer_thread.join(timeout=5.0)
+                if self._consumer_thread.is_alive():
+                    logger.warning("Indexer consumer thread did not exit in time. Clearing queue to unblock.")
+                    # Force clear the queue if join is taking too long
+                    while not self.work_queue.empty():
+                        try:
+                            self.work_queue.get_nowait()
+                            self.work_queue.task_done()
+                        except queue.Empty:
+                            break
+                    # Final attempt to join
+                    self._consumer_thread.join(timeout=2.0)
             except Exception as e:
-                logger.error("Error closing SQLite connection: %s", e)
-
-            # 3. Re-run initialization with recovery logic
-            if os.path.exists(self.config.CHROMA_DATA_PATH):
-                shutil.rmtree(self.config.CHROMA_DATA_PATH, ignore_errors=True)
-            
-            self._init_chromadb_with_recovery()
-            
-            # 4. Re-read paths and init SQLite
-            self.state_db_path = Path(self.config.CHROMA_DATA_PATH) / self.config.STATE_DB_NAME
-            self._writer_db_conn = sqlite3.connect(
-                self.state_db_path,
-                check_same_thread=False,
-                timeout=30.0
-            )
-            self._init_state_db(self._writer_db_conn)
-            
-            # 5. Clear any residual items from active producers before restart (Mahaguru Refinement)
-            while not self.work_queue.empty():
-                try:
-                    self.work_queue.get_nowait()
-                    self.work_queue.task_done()
-                except queue.Empty:
-                    break
-            
-            # 6. Restart consumer
-            self._start_consumer()
-            
-        logger.info("Database rebuild complete.")
-        return "SUCCESS: Code-Search database has been completely rebuilt from scratch."
+                logger.error("Error during indexer consumer join: %s", e)
+            finally:
+                self._consumer_thread = None
+    def rebuild_database(self) -> str:
+        """
+        [DEPRECATED] Use core.dependencies.factory_reset() instead.
+        This local method is kept for legacy compatibility but delegates to the global orchestrator.
+        """
+        logger.warning("Local rebuild_database called. Delegating to global factory_reset...")
+        from core.dependencies import factory_reset
+        return factory_reset()
 
     def _delete_file_state(self, conn: sqlite3.Connection, file_path: str):
         """Remove a file from the state DB and chunk content (Pillar I/Priority 1)."""
@@ -505,6 +513,9 @@ class CodeIndexer:
                 except Exception as e:
                     logger.error("Error processing file %s: %s", fp, e)
 
+        # Wait for all batches to be written to DB by the consumer thread
+        self._wait_for_queue()
+
         logger.info("Indexing complete. %d chunks processed.", total_chunks)
 
         return {
@@ -630,6 +641,9 @@ class CodeIndexer:
         stats = _get_file_stats(file_path)
         chunks, tokens = self._process_file_worker(file_path, stats, project_name)
 
+        # Sync update: wait for completion
+        self._wait_for_queue()
+
         return {"chunks_upserted": chunks, "total_tokens": tokens}
 
     def list_projects(self) -> List[str]:
@@ -689,7 +703,7 @@ class CodeIndexer:
         """Remove multiple files from the state DB in batches (optimized)."""
         if not file_paths:
             return
-            
+
         batch_size = 500
         for i in range(0, len(file_paths), batch_size):
             batch = file_paths[i:i+batch_size]
@@ -719,14 +733,14 @@ class CodeIndexer:
             with self._db_lock:
                 # 1.1 Delete from Vector DB (Chroma)
                 # Chroma doesn't have a direct 'where file_path IN [...]', so we use metadata filter
-                # or just delete file by file if the batch is small, but for production, 
+                # or just delete file by file if the batch is small, but for production,
                 # we query IDs first then delete.
                 for i in range(0, len(stale_file_paths), 100):
                     batch = stale_file_paths[i:i+100]
                     results = self.collection.get(where={"file_path": {"$in": batch}}, include=[])
                     if results and results.get("ids"):
                         self.collection.delete(ids=results["ids"])
-                
+
                 # 1.2 Delete from SQLite state
                 self._batch_delete_file_state(self._writer_db_conn, stale_file_paths)
 
@@ -739,6 +753,16 @@ class CodeIndexer:
                     logger.info("Pruning non-existent project root: %s", root)
                     self._delete_project_root(self._writer_db_conn, root)
                     pruned_roots += 1
+
+        # 3. Reclaim Disk Space (Production Hardening)
+        pruned_count = len(stale_file_paths) + pruned_roots
+        if pruned_count > 0:
+            logger.info("Executed maintenance: pruned %d items. Vacuuming SQLite database...", pruned_count)
+            try:
+                with self._db_lock:
+                    self._writer_db_conn.execute("VACUUM")
+            except Exception as e:
+                logger.error("Failed to vacuum database: %s", e)
 
         return {
             "pruned_files": len(stale_file_paths),

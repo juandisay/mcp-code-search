@@ -19,6 +19,8 @@ _MCP_MODE = "--mcp" in sys.argv
 setup_logging(level=logging.INFO, mcp_mode=_MCP_MODE)
 logger = logging.getLogger(__name__)
 
+logger.info("Code-Memory MCP: System verified for production (1.0.0-production)")
+
 # 2. Define MCP Server and Register Tools
 mcp = FastMCP("CodeMemoryMCP")
 register_mcp_tools(mcp)
@@ -39,6 +41,14 @@ async def lifespan(app: FastAPI):
             config.PROJECT_FOLDER_TO_INDEX,
         )
 
+    # Startup Maintenance (Production Hardening)
+    # Hook prune_stale_files to run quietly in the background on boot
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None,
+        indexer.prune_stale_files,
+    )
+
     yield
 
     # Graceful Shutdown
@@ -48,7 +58,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Code-Memory API",
     description="Local code index for semantic search",
-    version="1.0.0",
+    version="1.0.0-production",
     lifespan=lifespan,
 )
 
@@ -59,7 +69,26 @@ app.include_router(api_router)
 if __name__ == "__main__":
     if _MCP_MODE:
         logger.info("Starting MCP server (stdio transport)...")
-        mcp.run()
+        # Manual Lifecycle: Lifespan is bypassed in stdio mode, so we trigger tasks here
+        import threading
+        indexer = get_indexer()
+        
+        # 1. Background Maintenance
+        threading.Thread(target=indexer.prune_stale_files, daemon=True).start()
+        
+        # 2. Optional Auto-index
+        if config.PROJECT_FOLDER_TO_INDEX:
+            threading.Thread(
+                target=run_background_indexing, 
+                args=(config.PROJECT_FOLDER_TO_INDEX,), 
+                daemon=True
+            ).start()
+        
+        try:
+            mcp.run()
+        finally:
+            logger.info("MCP stdio shutdown: cleaning up dependencies...")
+            shutdown_dependencies()
     elif "--index" in sys.argv:
         try:
             idx = sys.argv.index("--index")
@@ -76,6 +105,8 @@ if __name__ == "__main__":
                 print("Error: Missing folder path after --index")
         except Exception as e:
             print(f"Error during manual indexing: {e}")
+        finally:
+            shutdown_dependencies()
     else:
         import uvicorn
         logger.info("Starting FastAPI on http://127.0.0.1:8000 ...")

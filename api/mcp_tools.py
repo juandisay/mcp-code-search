@@ -132,8 +132,8 @@ def rebuild_index_database() -> str:
     """Manually trigger a full database wipe and re-initialization (Factory Reset)."""
     logger.warning("MCP Tool: rebuild_index_database triggered.")
     try:
-        indexer = get_indexer()
-        return indexer.rebuild_database()
+        from core.dependencies import factory_reset
+        return factory_reset()
     except Exception as e:
         logger.error("Error during rebuild tool execution: %s", e)
         return f"CRITICAL ERROR: Failed to rebuild database: {e}"

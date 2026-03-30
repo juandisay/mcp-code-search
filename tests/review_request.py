@@ -1,8 +1,7 @@
 import asyncio
-import os
-import sys
-from config import config
+
 from core.mahaguru_client import mahaguru_client
+
 
 async def main():
     brief = """
@@ -15,18 +14,18 @@ Bagaimana pendapat arsitektural Anda mengenai fitur-fitur ini? Apakah sudah cuku
 """
     try:
         from core.context_assembler import context_assembler
-        
+
         relevant_files = [
-            'core/ast_chunker.py', 
-            'core/indexer.py', 
-            'api/mcp_tools.py', 
+            'core/ast_chunker.py',
+            'core/indexer.py',
+            'api/mcp_tools.py',
             'api/fastapi_routes.py'
         ]
-        
+
         context = context_assembler.assemble_refinement_context(brief, relevant_files)
-        
+
         response, _ = await mahaguru_client.get_refinement(
-            brief, 
+            brief,
             code_context=context
         )
         print(response)

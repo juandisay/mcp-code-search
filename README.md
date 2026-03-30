@@ -33,10 +33,14 @@ For detailed information, please refer to the following guides:
 ## 🚀 Quick Start
 
 ### 1. Install
+> [!IMPORTANT]
+> **Python 3.12.x** is recommended for peak performance and stability. While **Python 3.13** is supported in `chromadb==1.5.5+`, it may still exhibit instability in certain environments.
+
 ```bash
 git clone <your-repo-url> mcp-code-search
 cd mcp-code-search
-python -m venv venv
+# Python 3.12 is recommended
+python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
